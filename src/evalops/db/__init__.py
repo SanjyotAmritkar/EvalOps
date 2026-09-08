@@ -1,10 +1,13 @@
-"""Persistence layer: SQLAlchemy ORM schema and engine configuration.
+"""Persistence layer: SQLAlchemy ORM schema, session management, and repositories.
 
-Schema and infrastructure only -- no repositories or business logic yet.
+The ORM models mirror the frozen domain entities but stay separate from them;
+:mod:`evalops.db.mapping` is the only place the two meet. No FastAPI, no
+workers, no changes to the evaluation engine.
 """
 
 from evalops.db.base import Base
 from evalops.db.engine import DEFAULT_DATABASE_URL, create_db_engine, database_url
+from evalops.db.errors import PersistenceError, RecordConflict
 from evalops.db.models import (
     CaseResult,
     Dataset,
@@ -18,6 +21,16 @@ from evalops.db.models import (
     ReleasePolicy,
     SystemVersion,
 )
+from evalops.db.repositories import (
+    DatasetRepository,
+    EvaluationResultRepository,
+    EvaluationRunRepository,
+    ExperimentRepository,
+    ProjectRepository,
+    ReleasePolicyRepository,
+    SystemVersionRepository,
+)
+from evalops.db.session import session_factory, unit_of_work
 
 __all__ = [
     "DEFAULT_DATABASE_URL",
@@ -25,14 +38,25 @@ __all__ = [
     "CaseResult",
     "Dataset",
     "DatasetCase",
+    "DatasetRepository",
     "EvaluationResult",
+    "EvaluationResultRepository",
     "EvaluationRun",
+    "EvaluationRunRepository",
     "EvaluatorScore",
     "Experiment",
+    "ExperimentRepository",
     "MetricComparison",
+    "PersistenceError",
     "Project",
+    "ProjectRepository",
+    "RecordConflict",
     "ReleasePolicy",
+    "ReleasePolicyRepository",
     "SystemVersion",
+    "SystemVersionRepository",
     "create_db_engine",
     "database_url",
+    "session_factory",
+    "unit_of_work",
 ]
