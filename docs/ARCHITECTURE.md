@@ -152,15 +152,17 @@ Core entities:
 - **EvaluationRun** — one execution of one DatasetCase against one SystemVersion (captures raw output, latency, tokens, cost)
 - **CaseResult** — the scored outcome of an EvaluationRun (per-evaluator scores)
 - **EvaluationResult** — aggregated Experiment-level result (baseline vs candidate, per metric, with statistical comparison)
-- **ReleasePolicy** — thresholds (max quality regression, max cost increase, max latency increase, safety violation tolerance) that determine PASS/FAIL
+- **ReleasePolicy** — release-gate thresholds keyed by named metric (each value a fractional regression tolerance, e.g. `0.15` == 15%), plus an explicit `max_safety_violations` count. Representation only in Phase 0; metric directionality (higher- vs lower-is-better) and the PASS/FAIL gating logic are deferred to the later release-gating/statistical phase
 
 Evaluator interface (unify all evaluator types behind one contract):
 
 ```python
 class Evaluator:
-    def evaluate(self, run: EvaluationRun, reference: DatasetCase) -> EvaluationResult:
+    def evaluate(self, run: EvaluationRun, reference: DatasetCase) -> EvaluatorScore:
         ...
 ```
+
+An individual evaluator returns an `EvaluatorScore`. Multiple `EvaluatorScore`s for one run compose into a `CaseResult`; experiment-level aggregation of `CaseResult`s produces an `EvaluationResult`.
 
 Three evaluator families implement this interface:
 1. **Deterministic** — exact match, regex, JSON schema validation, code execution, tool-argument validation
@@ -286,6 +288,8 @@ Stretch (once Phase 8 exists):
 /infra          docker-compose, Dockerfiles
 /docs           this file and any supporting design docs
 ```
+
+Python code is packaged under an installable `src/evalops/` package (src layout). The frozen Phase 0 domain model lives at `src/evalops/domain/`. The entries above are `evalops` submodules — `evalops.gateway`, `evalops.eval`, `evalops.api`, `evalops.worker`, `evalops.ci` — not top-level directories; non-Python trees (`datasets/`, `dashboard/`, `infra/`, `docs/`) stay at the repository root. Each is created only when its phase begins.
 
 ## 13. README Structure
 

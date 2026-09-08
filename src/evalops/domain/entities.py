@@ -17,6 +17,7 @@ from evalops.domain._time import utcnow
 from evalops.domain.enums import CaseOrigin, ProviderName
 from evalops.domain.errors import DomainValidationError
 from evalops.domain.ids import new_id
+from evalops.domain.value_objects import EvaluatorScore, MetricComparison, UsageMetrics
 
 
 def _require_non_empty(value: str, label: str) -> None:
@@ -152,3 +153,148 @@ class Dataset:
         case_ids = [case.id for case in self.cases]
         if len(case_ids) != len(set(case_ids)):
             raise DomainValidationError("Dataset.cases contains duplicate case ids")
+
+
+@dataclass(frozen=True, slots=True)
+class Experiment:
+    """A defined comparison of a baseline SystemVersion against a candidate one
+    over a Dataset. Execution state is not modelled in this phase.
+    """
+
+    project_id: str
+    dataset_id: str
+    baseline_version_id: str
+    candidate_version_id: str
+    repeats: int = 1
+    release_policy_id: str | None = None
+    id: str = field(default_factory=new_id)
+    created_at: datetime = field(default_factory=utcnow)
+
+    def __post_init__(self) -> None:
+        for value, label in (
+            (self.project_id, "Experiment.project_id"),
+            (self.dataset_id, "Experiment.dataset_id"),
+            (self.baseline_version_id, "Experiment.baseline_version_id"),
+            (self.candidate_version_id, "Experiment.candidate_version_id"),
+            (self.id, "Experiment.id"),
+        ):
+            _require_non_empty(value, label)
+        if self.baseline_version_id == self.candidate_version_id:
+            raise DomainValidationError(
+                "Experiment baseline and candidate must be different SystemVersions"
+            )
+        if self.repeats < 1:
+            raise DomainValidationError(f"Experiment.repeats must be >= 1, got {self.repeats}")
+        if self.release_policy_id is not None:
+            _require_non_empty(self.release_policy_id, "Experiment.release_policy_id")
+        _require_aware(self.created_at, "Experiment.created_at")
+
+
+@dataclass(frozen=True, slots=True)
+class EvaluationRun:
+    """One execution of one DatasetCase against one SystemVersion.
+
+    A successful run carries the model ``output``; a failed run carries a
+    non-blank ``error`` and typically an empty ``output`` with zero usage.
+    """
+
+    experiment_id: str
+    system_version_id: str
+    case_id: str
+    repeat_index: int
+    output: str
+    usage: UsageMetrics = field(default_factory=UsageMetrics)
+    error: str | None = None
+    id: str = field(default_factory=new_id)
+    created_at: datetime = field(default_factory=utcnow)
+
+    def __post_init__(self) -> None:
+        for value, label in (
+            (self.experiment_id, "EvaluationRun.experiment_id"),
+            (self.system_version_id, "EvaluationRun.system_version_id"),
+            (self.case_id, "EvaluationRun.case_id"),
+            (self.id, "EvaluationRun.id"),
+        ):
+            _require_non_empty(value, label)
+        if self.repeat_index < 0:
+            raise DomainValidationError(
+                f"EvaluationRun.repeat_index must be >= 0, got {self.repeat_index}"
+            )
+        if self.error is not None and not self.error.strip():
+            raise DomainValidationError("EvaluationRun.error must be non-blank when set")
+        _require_aware(self.created_at, "EvaluationRun.created_at")
+
+
+@dataclass(frozen=True, slots=True)
+class CaseResult:
+    """The scored outcome of one EvaluationRun: its per-evaluator scores."""
+
+    run_id: str
+    scores: tuple[EvaluatorScore, ...]
+    id: str = field(default_factory=new_id)
+    created_at: datetime = field(default_factory=utcnow)
+
+    def __post_init__(self) -> None:
+        _require_non_empty(self.run_id, "CaseResult.run_id")
+        _require_non_empty(self.id, "CaseResult.id")
+        _require_aware(self.created_at, "CaseResult.created_at")
+        object.__setattr__(self, "scores", tuple(self.scores))
+        names = [score.evaluator for score in self.scores]
+        if len(names) != len(set(names)):
+            raise DomainValidationError("CaseResult.scores has duplicate evaluator names")
+
+
+@dataclass(frozen=True, slots=True)
+class EvaluationResult:
+    """Experiment-level comparison: one MetricComparison per named metric.
+
+    Representation only. Aggregation from CaseResults and any release decision
+    are produced by later phases, not stored or computed here.
+    """
+
+    experiment_id: str
+    metrics: tuple[MetricComparison, ...]
+    id: str = field(default_factory=new_id)
+    created_at: datetime = field(default_factory=utcnow)
+
+    def __post_init__(self) -> None:
+        _require_non_empty(self.experiment_id, "EvaluationResult.experiment_id")
+        _require_non_empty(self.id, "EvaluationResult.id")
+        _require_aware(self.created_at, "EvaluationResult.created_at")
+        object.__setattr__(self, "metrics", tuple(self.metrics))
+        names = [comparison.metric for comparison in self.metrics]
+        if len(names) != len(set(names)):
+            raise DomainValidationError("EvaluationResult.metrics has duplicate metric names")
+
+
+@dataclass(frozen=True, slots=True)
+class ReleasePolicy:
+    """Release-gate thresholds. Representation only; no gating logic here.
+
+    ``thresholds`` maps a metric name to the maximum tolerated adverse change
+    for that metric, as a fraction (``0.15`` == 15%). Whether a change counts as
+    adverse (higher-is-better vs lower-is-better) is a property of the metric,
+    resolved by the gate engine in a later phase, not by this policy.
+    """
+
+    name: str
+    thresholds: Mapping[str, float] = field(default_factory=dict)
+    max_safety_violations: int = 0
+    id: str = field(default_factory=new_id)
+
+    def __post_init__(self) -> None:
+        _require_non_empty(self.name, "ReleasePolicy.name")
+        _require_non_empty(self.id, "ReleasePolicy.id")
+        if self.max_safety_violations < 0:
+            raise DomainValidationError(
+                f"ReleasePolicy.max_safety_violations must be >= 0, "
+                f"got {self.max_safety_violations}"
+            )
+        for metric, ceiling in self.thresholds.items():
+            if not metric.strip():
+                raise DomainValidationError("ReleasePolicy.thresholds has a blank metric name")
+            if ceiling < 0:
+                raise DomainValidationError(
+                    f"ReleasePolicy threshold for {metric!r} must be >= 0, got {ceiling}"
+                )
+        object.__setattr__(self, "thresholds", _read_only(self.thresholds))
