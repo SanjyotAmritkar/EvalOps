@@ -1,32 +1,15 @@
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ReactNode } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import ProjectsPage from "@/app/projects/page";
+import { jsonResponse, makeWrapper } from "../test-utils";
 
-function makeWrapper() {
-  const client = new QueryClient({
-    defaultOptions: {
-      queries: { retry: false },
-      mutations: { retry: false },
-    },
-  });
-  return function Wrapper({ children }: { children: ReactNode }) {
-    return (
-      <QueryClientProvider client={client}>{children}</QueryClientProvider>
-    );
-  };
-}
-
-function jsonResponse(body: unknown, status = 200): Response {
-  return {
-    ok: status >= 200 && status < 300,
-    status,
-    statusText: status === 201 ? "Created" : "OK",
-    json: () => Promise.resolve(body),
-  } as Response;
-}
+vi.mock("next/link", () => ({
+  default: ({ href, children }: { href: string; children: ReactNode }) => (
+    <a href={typeof href === "string" ? href : "#"}>{children}</a>
+  ),
+}));
 
 const PROJECT = {
   id: "p1",
@@ -49,12 +32,13 @@ describe("ProjectsPage", () => {
     expect(await screen.findByText("No projects yet")).toBeInTheDocument();
   });
 
-  it("renders the project list returned by the API", async () => {
+  it("renders each project as a link into its workspace", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse([PROJECT])));
 
     render(<ProjectsPage />, { wrapper: makeWrapper() });
 
-    expect(await screen.findByText("Support Assistant")).toBeInTheDocument();
+    const link = await screen.findByRole("link", { name: /Support Assistant/ });
+    expect(link).toHaveAttribute("href", "/projects/p1");
   });
 
   it("surfaces an API failure with a retry affordance", async () => {

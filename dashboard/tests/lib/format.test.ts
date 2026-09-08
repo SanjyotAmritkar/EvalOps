@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { formatDateTime, formatRelativeTime } from "@/lib/format";
+import {
+  formatDateTime,
+  formatFraction,
+  formatRelativeTime,
+  shortId,
+} from "@/lib/format";
 
 describe("formatDateTime", () => {
   it("renders a parseable ISO timestamp with the year present", () => {
@@ -32,5 +37,26 @@ describe("formatRelativeTime", () => {
 
   it("returns the raw input for an unparseable value", () => {
     expect(formatRelativeTime("nope", now)).toBe("nope");
+  });
+});
+
+describe("formatFraction", () => {
+  it("shows the fraction and its percentage", () => {
+    expect(formatFraction(0.1)).toBe("0.1 (10%)");
+    expect(formatFraction(0.2)).toBe("0.2 (20%)");
+  });
+
+  it("handles non-round percentages", () => {
+    expect(formatFraction(0.155)).toBe("0.155 (15.5%)");
+  });
+});
+
+describe("shortId", () => {
+  it("truncates long ids with an ellipsis", () => {
+    expect(shortId("0123456789abcdef")).toBe("01234567…");
+  });
+
+  it("leaves short ids alone", () => {
+    expect(shortId("abc")).toBe("abc");
   });
 });

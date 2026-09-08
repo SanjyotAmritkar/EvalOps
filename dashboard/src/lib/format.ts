@@ -35,3 +35,17 @@ export function formatRelativeTime(iso: string, now: Date = new Date()): string 
   }
   return formatter.format(0, "second");
 }
+
+/** Render a fractional threshold as "0.1 (10%)" so its meaning is unambiguous. */
+export function formatFraction(value: number): string {
+  const percent = value * 100;
+  const percentText = Number.isInteger(percent)
+    ? String(percent)
+    : String(Number(percent.toFixed(4)));
+  return `${value} (${percentText}%)`;
+}
+
+/** First 8 characters of an id, for compact display of an unresolved reference. */
+export function shortId(id: string): string {
+  return id.length > 8 ? `${id.slice(0, 8)}…` : id;
+}

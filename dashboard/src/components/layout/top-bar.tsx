@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { Wordmark } from "@/components/logo";
 import { ThemeToggle } from "@/components/theme-toggle";
 
 export function TopBar() {
@@ -7,13 +8,10 @@ export function TopBar() {
       <div className="mx-auto flex h-14 max-w-6xl items-center justify-between px-6">
         <Link
           href="/projects"
-          className="flex items-center gap-2 text-sm font-semibold tracking-tight text-fg"
+          className="rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          aria-label="EvalOps — projects"
         >
-          <span
-            className="inline-block h-5 w-5 rounded bg-accent"
-            aria-hidden
-          />
-          EvalOps
+          <Wordmark />
         </Link>
         <ThemeToggle />
       </div>

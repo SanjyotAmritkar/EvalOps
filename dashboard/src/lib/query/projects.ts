@@ -1,11 +1,11 @@
 "use client";
 
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
-  useMutation,
-  useQuery,
-  useQueryClient,
-} from "@tanstack/react-query";
-import { createProject, listProjects } from "@/lib/api/projects";
+  createProject,
+  getProject,
+  listProjects,
+} from "@/lib/api/projects";
 import type { Project, ProjectCreate } from "@/lib/api/types";
 import { queryKeys } from "./keys";
 
@@ -13,6 +13,14 @@ export function useProjects() {
   return useQuery({
     queryKey: queryKeys.projects.all,
     queryFn: listProjects,
+  });
+}
+
+export function useProject(projectId: string) {
+  return useQuery({
+    queryKey: queryKeys.projects.detail(projectId),
+    queryFn: () => getProject(projectId),
+    enabled: projectId.length > 0,
   });
 }
 

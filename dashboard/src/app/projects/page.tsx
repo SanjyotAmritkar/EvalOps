@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useState, type FormEvent } from "react";
 import { EmptyState } from "@/components/feedback/empty-state";
 import { ErrorState } from "@/components/feedback/error-state";
@@ -8,13 +9,10 @@ import { PageContainer } from "@/components/layout/page-container";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { TextField } from "@/components/ui/text-field";
-import { ApiError } from "@/lib/api/client";
+import { ChevronRightIcon } from "@/components/icons";
+import { apiErrorMessage } from "@/lib/api/errors";
 import { formatDateTime } from "@/lib/format";
 import { useCreateProject, useProjects } from "@/lib/query/projects";
-
-function messageFor(error: unknown, fallback: string): string {
-  return error instanceof ApiError ? error.message : fallback;
-}
 
 export default function ProjectsPage() {
   const projects = useProjects();
@@ -25,7 +23,7 @@ export default function ProjectsPage() {
   const canSubmit = trimmed.length > 0 && !createProject.isPending;
 
   const createError = createProject.isError
-    ? messageFor(
+    ? apiErrorMessage(
         createProject.error,
         "Could not create the project. Check that the API is running.",
       )
@@ -82,7 +80,7 @@ export default function ProjectsPage() {
       ) : projects.isError ? (
         <ErrorState
           title="Could not load projects"
-          message={messageFor(
+          message={apiErrorMessage(
             projects.error,
             "The API did not respond. Confirm the FastAPI server is running and reachable.",
           )}
@@ -97,14 +95,24 @@ export default function ProjectsPage() {
         <ul className="flex flex-col gap-2">
           {list.map((project) => (
             <li key={project.id}>
-              <Card className="flex items-center justify-between gap-4 px-4 py-3">
-                <span className="truncate font-medium text-fg">
-                  {project.name}
+              <Link
+                href={`/projects/${project.id}`}
+                className="group flex items-center justify-between gap-4 rounded-lg border border-border bg-surface px-4 py-3 transition-colors hover:border-fg-subtle/40 hover:bg-surface-raised focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              >
+                <span className="flex min-w-0 flex-col gap-0.5">
+                  <span className="truncate font-medium text-fg">
+                    {project.name}
+                  </span>
+                  <span className="truncate text-xs text-fg-subtle">
+                    Created {formatDateTime(project.created_at)}
+                  </span>
                 </span>
-                <span className="shrink-0 text-xs text-fg-subtle">
-                  Created {formatDateTime(project.created_at)}
-                </span>
-              </Card>
+                <ChevronRightIcon
+                  width={16}
+                  height={16}
+                  className="shrink-0 text-fg-subtle transition-transform group-hover:translate-x-0.5 group-hover:text-fg-muted"
+                />
+              </Link>
             </li>
           ))}
         </ul>

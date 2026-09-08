@@ -5,6 +5,10 @@ export function listProjects(): Promise<Project[]> {
   return apiFetch<Project[]>("/projects");
 }
 
+export function getProject(projectId: string): Promise<Project> {
+  return apiFetch<Project>(`/projects/${projectId}`);
+}
+
 export function createProject(body: ProjectCreate): Promise<Project> {
   return apiFetch<Project>("/projects", {
     method: "POST",
