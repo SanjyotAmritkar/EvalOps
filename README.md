@@ -72,12 +72,12 @@ dataset, so every fixed bug becomes a permanent test case:
 
 ## Development status
 
-**Phase 1 — core CLI evaluation loop (in progress).** `evalops run config.yaml`
-runs an offline, deterministic baseline-vs-candidate evaluation end to end. Real
-model providers are not wired yet: Phase 1 executes against a built-in
-deterministic **mock** provider, so every example metric is a synthetic test
-value, not real model output. The full design and phase plan live in
-[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md), which is the source of truth.
+**Phase 1 — core CLI evaluation loop (complete).** `evalops run config.yaml`
+runs a baseline-vs-candidate evaluation end to end. Two execution backends:
+`mock` (built-in, deterministic, offline — used by the checked-in examples and
+all CI) and `ollama` (real inference against a local Ollama server). The full
+design and phase plan live in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md),
+which is the source of truth.
 
 The sections below follow the discipline required by `docs/ARCHITECTURE.md §13`:
 a feature is listed under **SHIPPED** only if its full path actually works today.
@@ -91,9 +91,14 @@ a feature is listed under **SHIPPED** only if its full path actually works today
   Experiment / EvaluationRun / CaseResult / EvaluationResult / MetricComparison /
   ReleasePolicy, plus the `Evaluator` and `ProviderClient` contracts
 - **JSONL evaluation datasets** — `load_jsonl` with line-numbered validation
-- **Deterministic offline execution** — a configurable built-in `MockProvider`
-  (exact rendered-prompt → response; synthetic token / latency / cost values);
-  no network, no randomness
+- **Deterministic offline execution** (`backend: mock`) — a configurable
+  built-in `MockProvider` (exact rendered-prompt → response; synthetic
+  token / latency / cost values); no network, no randomness
+- **Real local execution** (`backend: ollama`) — `OllamaProvider` calls a local
+  Ollama server (`POST /api/generate`, stdlib HTTP, no API key); usage metrics
+  (`prompt_eval_count`, `eval_count`, `total_duration`) come straight from
+  Ollama, `cost_usd` is 0.0. The evaluation / gating / reporting pipeline is
+  unchanged — only the provider differs.
 - **Deterministic evaluators** — `exact_match`, `contains`, `regex_match`
 - **Baseline vs candidate comparison** — synchronous runner producing
   `EvaluationRun` / `CaseResult` records, with repeats and per-case failure
@@ -104,25 +109,25 @@ a feature is listed under **SHIPPED** only if its full path actually works today
   metric-direction rules, explicit zero-baseline handling, PASS / BLOCK
 - **`evalops run`** — YAML config, human report on stdout, stable `--json`
   result output, exit codes `0` (pass) / `1` (block) / `2` (error)
-- Worked example: [examples/support/](examples/support/) — `regression.yaml`
-  BLOCKs on a latency budget while quality improves; `fixed.yaml` PASSes
+- Worked examples: [examples/support/](examples/support/) — `regression.yaml`
+  BLOCKs on a latency budget while quality improves; `fixed.yaml` PASSes;
+  `ollama.yaml` is a real local smoke run
 
 ### NOT YET SHIPPED
 
-- Real provider execution — OpenAI, Anthropic
-- **Ollama** (local inference) — Phase 1 Checkpoint 6, next
+- Hosted provider execution — OpenAI, Anthropic
 - Persistence, API, dashboard
 - Statistical gating — bootstrap confidence intervals, significance, effect size
 - Production traces, RAG evaluation, agent evaluation, LLM-as-judge
+- Cloud deployment
 
-`MockProvider` is **not** real model inference — it is deterministic test
-infrastructure for offline development and CI.
+`MockProvider` is deterministic test infrastructure for offline development and
+CI — **not** model inference. `OllamaProvider` is real local model inference.
 
-### COMMITTED (current milestone — finish Phase 1)
+### COMMITTED (current milestone — Phase 2)
 
-- Checkpoint 6: a real `OllamaProvider` (local, no API key) proving the provider
-  abstraction against genuine model execution — without making CI depend on
-  Ollama being installed or running
+- Persistence + API: FastAPI, PostgreSQL, SQLAlchemy, Alembic — re-running an
+  experiment reproduces its stored configuration
 
 ### ROADMAP (planned next, in order)
 
@@ -228,8 +233,18 @@ uv run evalops run examples/support/fixed.yaml --json - --quiet   # JSON only
 ```
 
 `--json PATH` also writes the machine-readable result to a file. All numbers in
-the examples come from the built-in deterministic mock provider, not a real
+these examples come from the built-in deterministic mock provider, not a real
 model.
+
+To run against a real local model instead, install [Ollama](https://ollama.com),
+start it (`ollama serve`), pull a model (`ollama pull llama3.2`), and:
+
+```bash
+uv run evalops run examples/support/ollama.yaml
+```
+
+Outputs and latency are then real and vary between runs. This path is not
+exercised by CI.
 
 ### Repository layout
 

@@ -1,0 +1,74 @@
+# EvalOps example -- REAL LOCAL EXECUTION against Ollama.
+#
+# Unlike regression.yaml / fixed.yaml (which use the deterministic mock), this
+# config runs the baseline and candidate against a local Ollama server, so
+# outputs and latency are REAL and will vary between runs.
+#
+# Local requirements (NOT run in CI):
+#   1. Ollama installed            https://ollama.com/download
+#   2. Ollama service running      `ollama serve`
+#   3. The model available locally `ollama pull llama3.2`
+#
+# Edit `model:` below to any model you have pulled locally.
+#
+#   uv run evalops run examples/support/ollama.yaml
+#
+# Baseline and candidate are identical apart from the version label: this is a
+# smoke run that proves the real provider flows through the unchanged
+# evaluation / gating / reporting pipeline. cost_usd.total stays 0.0 -- local
+# Ollama has no per-request charge.
+
+project: "Customer Support QA"
+
+dataset:
+  path: "cases.jsonl"
+  name: "support"
+
+repeats: 1
+
+execution:
+  backend: ollama
+  base_url: "http://localhost:11434"
+  timeout_seconds: 120
+
+baseline:
+  name: "support-prompt"
+  version: "v1"
+  provider: "ollama"
+  model: "llama3.2"
+  prompt_template: |-
+    Answer with a single word.
+    Q: ${input}
+    A:
+  parameters:
+    temperature: 0.0
+    seed: 42
+
+candidate:
+  name: "support-prompt"
+  version: "v2"
+  provider: "ollama"
+  model: "llama3.2"
+  prompt_template: |-
+    Answer with a single word.
+    Q: ${input}
+    A:
+  parameters:
+    temperature: 0.0
+    seed: 42
+
+evaluators:
+  - type: contains
+    case_sensitive: false
+  - type: regex_match
+    name: non_empty
+    pattern: "\\S"
+
+release_policy:
+  name: "default"
+  thresholds:
+    success_rate: 0.0
+    contains.pass_rate: 0.10
+    latency_ms.p95: 0.50
+    cost_usd.total: 0.10
+  max_safety_violations: 0

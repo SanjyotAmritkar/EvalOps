@@ -14,6 +14,7 @@ from evalops.config import load_run_plan
 from evalops.domain.entities import ReleasePolicy
 from evalops.domain.enums import ProviderName
 from evalops.errors import ConfigError
+from evalops.ollama import DEFAULT_BASE_URL, OllamaProvider
 from evalops.providers import MockProvider
 
 
@@ -129,7 +130,7 @@ def test_invalid_provider(tmp_path: Path) -> None:
 
 def test_unsupported_execution_backend(tmp_path: Path) -> None:
     config = _base()
-    config["execution"]["backend"] = "ollama"
+    config["execution"]["backend"] = "vllm"
     with pytest.raises(ConfigError, match="not supported"):
         load_run_plan(_write(tmp_path, config))
 
@@ -226,4 +227,72 @@ def test_dataset_file_not_found(tmp_path: Path) -> None:
     config = _base()
     config["dataset"]["path"] = "nope.jsonl"
     with pytest.raises(ConfigError, match="cannot read dataset file"):
+        load_run_plan(_write(tmp_path, config))
+
+
+# --- execution backends -------------------------------------------------------
+
+
+def _ollama_base() -> dict[str, Any]:
+    config = _base()
+    config["execution"] = {"backend": "ollama"}
+    config["baseline"]["provider"] = "ollama"
+    config["candidate"]["provider"] = "ollama"
+    for version in ("baseline", "candidate"):
+        config[version].pop("parameters", None)
+    return config
+
+
+def test_backend_mock_injects_mock_provider_for_the_declared_identity(tmp_path: Path) -> None:
+    config = _base()
+    config["baseline"]["provider"] = "ollama"
+    config["candidate"]["provider"] = "ollama"
+    plan = load_run_plan(_write(tmp_path, config))
+
+    assert set(plan.providers) == {ProviderName.OLLAMA}
+    assert isinstance(plan.providers[ProviderName.OLLAMA], MockProvider)
+
+
+def test_backend_ollama_builds_an_ollama_provider_with_defaults(tmp_path: Path) -> None:
+    plan = load_run_plan(_write(tmp_path, _ollama_base()))
+
+    provider = plan.providers[ProviderName.OLLAMA]
+    assert isinstance(provider, OllamaProvider)
+    assert provider.base_url == DEFAULT_BASE_URL
+    assert provider.timeout_seconds == 120.0
+
+
+def test_backend_ollama_reads_explicit_connection_settings(tmp_path: Path) -> None:
+    config = _ollama_base()
+    config["execution"] = {
+        "backend": "ollama",
+        "base_url": "http://ollama.local:1234/",
+        "timeout_seconds": 30,
+    }
+    plan = load_run_plan(_write(tmp_path, config))
+
+    provider = plan.providers[ProviderName.OLLAMA]
+    assert isinstance(provider, OllamaProvider)
+    assert provider.base_url == "http://ollama.local:1234"  # trailing slash normalized
+    assert provider.timeout_seconds == 30.0
+
+
+def test_backend_ollama_rejects_non_ollama_provider(tmp_path: Path) -> None:
+    config = _ollama_base()
+    config["baseline"]["provider"] = "openai"
+    with pytest.raises(ConfigError, match="must be 'ollama'"):
+        load_run_plan(_write(tmp_path, config))
+
+
+def test_backend_ollama_rejects_unsupported_generation_parameter(tmp_path: Path) -> None:
+    config = _ollama_base()
+    config["candidate"]["parameters"] = {"frequency_penalty": 0.5}
+    with pytest.raises(ConfigError, match="not a supported Ollama generation parameter"):
+        load_run_plan(_write(tmp_path, config))
+
+
+def test_backend_ollama_rejects_non_positive_timeout(tmp_path: Path) -> None:
+    config = _ollama_base()
+    config["execution"] = {"backend": "ollama", "timeout_seconds": 0}
+    with pytest.raises(ConfigError, match="greater than 0"):
         load_run_plan(_write(tmp_path, config))

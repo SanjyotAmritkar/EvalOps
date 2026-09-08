@@ -1,6 +1,6 @@
 # EvalOps — Architecture & Project Reference
 
-**Status:** Design finalized, entering Phase 0 implementation
+**Status:** Phases 0 and 1 shipped — domain model frozen; the `evalops run` CLI evaluation loop works end to end with a deterministic mock backend and a real local Ollama backend. Phase 2 (persistence + API) is next.
 **Purpose of this document:** single source of truth for the system design, scope, roadmap, and acceptance criteria. Any contributor (human or tool-assisted) picking up this repo should be able to read this file and know exactly what to build next and why.
 
 ---

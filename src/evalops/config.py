@@ -28,9 +28,10 @@ from evalops.domain.enums import ProviderName
 from evalops.domain.errors import DomainValidationError
 from evalops.errors import ConfigError
 from evalops.evaluators import Contains, ExactMatch, RegexMatch
+from evalops.ollama import DEFAULT_BASE_URL, DEFAULT_TIMEOUT_SECONDS, OllamaProvider, build_options
 from evalops.providers import MockProvider
 
-_SUPPORTED_BACKENDS = frozenset({"mock"})
+_SUPPORTED_BACKENDS = frozenset({"mock", "ollama"})
 
 _T = TypeVar("_T")
 
@@ -73,7 +74,7 @@ def load_run_plan(config_path: str | Path) -> RunPlan:
         "dataset",
     )
 
-    _require_backend(root)
+    backend = _read_backend(root)
     repeats = _opt_int(root, "repeats", "config", default=1)
     if repeats < 1:
         raise ConfigError(f"config.repeats must be >= 1, got {repeats}")
@@ -97,7 +98,7 @@ def load_run_plan(config_path: str | Path) -> RunPlan:
 
     policy = _build_policy(root, [e.name for e in evaluators])
 
-    providers = _mock_providers(baseline, candidate)
+    providers = _build_providers(backend, root, baseline, candidate)
 
     return RunPlan(
         project=project,
@@ -221,20 +222,44 @@ def _build_policy(root: Mapping[str, Any], evaluator_names: Sequence[str]) -> Re
     )
 
 
-def _mock_providers(
-    baseline: SystemVersion, candidate: SystemVersion
-) -> Mapping[ProviderName, ProviderClient]:
-    return {name: MockProvider() for name in {baseline.provider, candidate.provider}}
-
-
-def _require_backend(root: Mapping[str, Any]) -> None:
+def _read_backend(root: Mapping[str, Any]) -> str:
     execution = _as_mapping(_req(root, "execution", "config"), "execution")
     backend = _req_str(execution, "backend", "execution")
     if backend not in _SUPPORTED_BACKENDS:
         raise ConfigError(
             f"execution.backend {backend!r} is not supported; "
-            f"this version supports only {sorted(_SUPPORTED_BACKENDS)}"
+            f"supported backends: {sorted(_SUPPORTED_BACKENDS)}"
         )
+    return backend
+
+
+def _build_providers(
+    backend: str,
+    root: Mapping[str, Any],
+    baseline: SystemVersion,
+    candidate: SystemVersion,
+) -> Mapping[ProviderName, ProviderClient]:
+    if backend == "mock":
+        # Deterministic simulation: MockProvider stands in for each declared identity.
+        return {name: MockProvider() for name in {baseline.provider, candidate.provider}}
+
+    # backend == "ollama": real local execution -- identities must actually be Ollama.
+    for label, version in (("baseline", baseline), ("candidate", candidate)):
+        if version.provider is not ProviderName.OLLAMA:
+            raise ConfigError(
+                f"execution.backend is 'ollama' but {label}.provider is "
+                f"{version.provider.value!r}; it must be 'ollama'"
+            )
+        build_options(version.parameters)  # reject unsupported generation params early
+
+    execution = _as_mapping(root["execution"], "execution")
+    base_url = _opt_str(execution, "base_url", "execution", default=None) or DEFAULT_BASE_URL
+    timeout_seconds = _opt_number(
+        execution, "timeout_seconds", "execution", default=DEFAULT_TIMEOUT_SECONDS
+    )
+    if timeout_seconds <= 0:
+        raise ConfigError("execution.timeout_seconds must be greater than 0")
+    return {ProviderName.OLLAMA: OllamaProvider(base_url=base_url, timeout_seconds=timeout_seconds)}
 
 
 # --- small typed parsing helpers -------------------------------------------------
@@ -293,6 +318,15 @@ def _opt_int(mapping: Mapping[str, Any], key: str, label: str, *, default: int) 
     if isinstance(value, bool) or not isinstance(value, int):
         raise ConfigError(f"{label}.{key} must be an integer, got {type(value).__name__}")
     return value
+
+
+def _opt_number(mapping: Mapping[str, Any], key: str, label: str, *, default: float) -> float:
+    if key not in mapping:
+        return default
+    value = mapping[key]
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise ConfigError(f"{label}.{key} must be a number, got {type(value).__name__}")
+    return float(value)
 
 
 def _opt_mapping(mapping: Mapping[str, Any], key: str, label: str) -> Mapping[str, Any]:
