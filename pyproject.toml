@@ -6,6 +6,7 @@ build-backend = "hatchling.build"
 name = "evalops"
 version = "0.0.0"
 description = "Continuous evaluation and release gating for LLM, RAG, and agent systems"
+readme = "README.md"
 requires-python = ">=3.11"
 license = { file = "LICENSE" }
 authors = [{ name = "Sanjyot Amritkar" }]
