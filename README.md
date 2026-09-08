@@ -72,12 +72,13 @@ dataset, so every fixed bug becomes a permanent test case:
 
 ## Development status
 
-**Phase 1 — core CLI evaluation loop (complete).** `evalops run config.yaml`
-runs a baseline-vs-candidate evaluation end to end. Two execution backends:
-`mock` (built-in, deterministic, offline — used by the checked-in examples and
-all CI) and `ollama` (real inference against a local Ollama server). The full
-design and phase plan live in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md),
-which is the source of truth.
+**Phase 1 — core CLI evaluation loop (complete, locally verified).**
+`evalops run config.yaml` runs a baseline-vs-candidate evaluation end to end.
+Two execution backends, both verified: `mock` (built-in, deterministic, offline
+— used by the checked-in examples and all CI) and `ollama` (real inference
+against a local Ollama server). CI is fully offline and never requires Ollama.
+The full design and phase plan live in
+[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md), which is the source of truth.
 
 The sections below follow the discipline required by `docs/ARCHITECTURE.md §13`:
 a feature is listed under **SHIPPED** only if its full path actually works today.
@@ -111,7 +112,8 @@ a feature is listed under **SHIPPED** only if its full path actually works today
   result output, exit codes `0` (pass) / `1` (block) / `2` (error)
 - Worked examples: [examples/support/](examples/support/) — `regression.yaml`
   BLOCKs on a latency budget while quality improves; `fixed.yaml` PASSes;
-  `ollama.yaml` is a real local smoke run
+  `ollama.yaml` is a real local smoke run, verified end to end against a local
+  Ollama server (PASS, 4 cases / 8 runs / 0 failures), outside CI
 
 ### NOT YET SHIPPED
 
