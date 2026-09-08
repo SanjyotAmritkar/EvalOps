@@ -8,12 +8,15 @@ semantic rules stay in the domain constructors, which surface as HTTP 422.
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any
+from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 from evalops import domain
-from evalops.domain.enums import CaseOrigin, ProviderName
+from evalops.domain.enums import CaseOrigin, EvaluatorFamily, ProviderName
+from evalops.execution import ExecutionSpec
+from evalops.gate import GateReport
+from evalops.ollama import DEFAULT_BASE_URL, DEFAULT_TIMEOUT_SECONDS
 
 
 class _Create(BaseModel):
@@ -191,4 +194,196 @@ class ExperimentRead(BaseModel):
             repeats=value.repeats,
             release_policy_id=value.release_policy_id,
             created_at=value.created_at,
+        )
+
+
+# --- run an experiment ---------------------------------------------
+
+
+class ExecutionOptions(_Create):
+    backend: Literal["mock", "ollama"] = "mock"
+    base_url: str = DEFAULT_BASE_URL
+    timeout_seconds: float = DEFAULT_TIMEOUT_SECONDS
+
+    def to_spec(self) -> ExecutionSpec:
+        return ExecutionSpec(
+            backend=self.backend, base_url=self.base_url, timeout_seconds=self.timeout_seconds
+        )
+
+
+class EvaluatorSpec(_Create):
+    type: str
+    name: str | None = None
+    case_sensitive: bool | None = None
+    pattern: str | None = None
+
+
+class RunRequest(_Create):
+    execution: ExecutionOptions = ExecutionOptions()
+    evaluators: Annotated[list[EvaluatorSpec], Field(min_length=1)]
+
+
+class MetricLineRead(BaseModel):
+    metric: str
+    baseline_value: float
+    candidate_value: float
+    delta: float
+    relative_delta: float | None
+    direction: str
+    threshold: float | None
+    adverse_change: float | None
+    regression: bool
+
+
+class RunResponse(BaseModel):
+    evaluation_result_id: str
+    experiment_id: str
+    dataset: str
+    baseline: str
+    candidate: str
+    repeats: int
+    counts: dict[str, int]
+    decision: str
+    gated: bool
+    reasons: list[str]
+    metrics: list[MetricLineRead]
+
+    @classmethod
+    def of(
+        cls,
+        *,
+        experiment: domain.Experiment,
+        dataset: domain.Dataset,
+        baseline: domain.SystemVersion,
+        candidate: domain.SystemVersion,
+        runs: list[domain.EvaluationRun],
+        result: domain.EvaluationResult,
+        gate: GateReport,
+        evaluation_result_id: str,
+    ) -> RunResponse:
+        verdicts = {verdict.metric: verdict for verdict in gate.verdicts}
+        return cls(
+            evaluation_result_id=evaluation_result_id,
+            experiment_id=experiment.id,
+            dataset=dataset.name,
+            baseline=f"{baseline.name} {baseline.version}",
+            candidate=f"{candidate.name} {candidate.version}",
+            repeats=experiment.repeats,
+            counts={
+                "cases": len(dataset.cases),
+                "runs": len(runs),
+                "failures": sum(1 for run in runs if run.error is not None),
+            },
+            decision=gate.decision.value,
+            gated=gate.gated,
+            reasons=list(gate.reasons),
+            metrics=[
+                MetricLineRead(
+                    metric=mc.metric,
+                    baseline_value=mc.baseline_value,
+                    candidate_value=mc.candidate_value,
+                    delta=mc.delta,
+                    relative_delta=mc.relative_delta,
+                    direction=verdicts[mc.metric].direction,
+                    threshold=verdicts[mc.metric].threshold,
+                    adverse_change=verdicts[mc.metric].adverse_change,
+                    regression=verdicts[mc.metric].regression,
+                )
+                for mc in result.metrics
+            ],
+        )
+
+
+# --- inspecting persisted results --------------------------------
+
+
+class UsageRead(BaseModel):
+    prompt_tokens: int
+    completion_tokens: int
+    total_tokens: int
+    cost_usd: float
+    latency_ms: float
+
+
+class EvaluatorScoreRead(BaseModel):
+    evaluator: str
+    family: EvaluatorFamily
+    score: float
+    passed: bool | None
+
+
+class EvaluationRunRead(BaseModel):
+    id: str
+    system_version_id: str
+    case_id: str
+    repeat_index: int
+    output: str
+    error: str | None
+    usage: UsageRead
+    scores: list[EvaluatorScoreRead]
+    created_at: datetime
+
+    @classmethod
+    def of(
+        cls, run: domain.EvaluationRun, case_result: domain.CaseResult | None
+    ) -> EvaluationRunRead:
+        return cls(
+            id=run.id,
+            system_version_id=run.system_version_id,
+            case_id=run.case_id,
+            repeat_index=run.repeat_index,
+            output=run.output,
+            error=run.error,
+            usage=UsageRead(
+                prompt_tokens=run.usage.prompt_tokens,
+                completion_tokens=run.usage.completion_tokens,
+                total_tokens=run.usage.total_tokens,
+                cost_usd=run.usage.cost_usd,
+                latency_ms=run.usage.latency_ms,
+            ),
+            scores=[]
+            if case_result is None
+            else [
+                EvaluatorScoreRead(
+                    evaluator=score.evaluator,
+                    family=score.family,
+                    score=score.score,
+                    passed=score.passed,
+                )
+                for score in case_result.scores
+            ],
+            created_at=run.created_at,
+        )
+
+
+class MetricComparisonRead(BaseModel):
+    metric: str
+    baseline_value: float
+    candidate_value: float
+    delta: float
+    relative_delta: float | None
+
+
+class EvaluationResultRead(BaseModel):
+    id: str
+    experiment_id: str
+    created_at: datetime
+    metrics: list[MetricComparisonRead]
+
+    @classmethod
+    def of(cls, value: domain.EvaluationResult) -> EvaluationResultRead:
+        return cls(
+            id=value.id,
+            experiment_id=value.experiment_id,
+            created_at=value.created_at,
+            metrics=[
+                MetricComparisonRead(
+                    metric=mc.metric,
+                    baseline_value=mc.baseline_value,
+                    candidate_value=mc.candidate_value,
+                    delta=mc.delta,
+                    relative_delta=mc.relative_delta,
+                )
+                for mc in value.metrics
+            ],
         )

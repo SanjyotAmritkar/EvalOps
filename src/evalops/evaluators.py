@@ -10,8 +10,11 @@ pipelines.
 from __future__ import annotations
 
 import re
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
+from typing import Any
 
+from evalops.domain.contracts import Evaluator
 from evalops.domain.entities import DatasetCase, EvaluationRun
 from evalops.domain.enums import EvaluatorFamily
 from evalops.domain.value_objects import EvaluatorScore
@@ -94,3 +97,61 @@ class RegexMatch:
 
     def evaluate(self, run: EvaluationRun, reference: DatasetCase) -> EvaluatorScore:
         return _score(self.name, passed=re.search(self.pattern, run.output) is not None)
+
+
+_EVALUATOR_TYPES = ("exact_match", "contains", "regex_match")
+
+
+def build_evaluators(specs: Sequence[Mapping[str, Any]]) -> tuple[Evaluator, ...]:
+    """Construct evaluators from a list of ``{"type": ..., ...}`` specs.
+
+    Shared by the YAML config loader and the API. Effective names must be
+    unique. Invalid specs raise :class:`~evalops.errors.ConfigError`.
+    """
+    built: list[Evaluator] = []
+    seen: set[str] = set()
+    for index, spec in enumerate(specs):
+        label = f"evaluators[{index}]"
+        if not isinstance(spec, Mapping):
+            raise ConfigError(f"{label} must be a mapping")
+        evaluator_type = spec.get("type")
+        if not isinstance(evaluator_type, str):
+            raise ConfigError(f"{label}: missing required field 'type'")
+        name = spec.get("name")
+        if name is not None and not isinstance(name, str):
+            raise ConfigError(f"{label}.name must be a string")
+
+        if evaluator_type == "exact_match":
+            evaluator: Evaluator = ExactMatch(
+                case_sensitive=_spec_bool(spec, "case_sensitive", label, default=True),
+                name=name or "exact_match",
+            )
+        elif evaluator_type == "contains":
+            evaluator = Contains(
+                case_sensitive=_spec_bool(spec, "case_sensitive", label, default=False),
+                name=name or "contains",
+            )
+        elif evaluator_type == "regex_match":
+            pattern = spec.get("pattern")
+            if not isinstance(pattern, str):
+                raise ConfigError(f"{label}: missing required field 'pattern'")
+            evaluator = RegexMatch(pattern=pattern, name=name or "regex_match")
+        else:
+            raise ConfigError(
+                f"{label}.type {evaluator_type!r} is not one of {list(_EVALUATOR_TYPES)}"
+            )
+
+        if evaluator.name in seen:
+            raise ConfigError(f"duplicate evaluator name {evaluator.name!r}")
+        seen.add(evaluator.name)
+        built.append(evaluator)
+    return tuple(built)
+
+
+def _spec_bool(spec: Mapping[str, Any], key: str, label: str, *, default: bool) -> bool:
+    if key not in spec:
+        return default
+    value = spec[key]
+    if not isinstance(value, bool):
+        raise ConfigError(f"{label}.{key} must be a boolean")
+    return value

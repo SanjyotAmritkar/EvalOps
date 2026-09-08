@@ -27,9 +27,9 @@ from evalops.domain.entities import (
 from evalops.domain.enums import ProviderName
 from evalops.domain.errors import DomainValidationError
 from evalops.errors import ConfigError
-from evalops.evaluators import Contains, ExactMatch, RegexMatch
-from evalops.ollama import DEFAULT_BASE_URL, DEFAULT_TIMEOUT_SECONDS, OllamaProvider, build_options
-from evalops.providers import MockProvider
+from evalops.evaluators import Contains, ExactMatch, build_evaluators
+from evalops.execution import ExecutionSpec, build_providers
+from evalops.ollama import DEFAULT_BASE_URL, DEFAULT_TIMEOUT_SECONDS
 
 _SUPPORTED_BACKENDS = frozenset({"mock", "ollama"})
 
@@ -143,41 +143,7 @@ def _build_evaluators(root: Mapping[str, Any]) -> tuple[Evaluator, ...]:
     specs = _req(root, "evaluators", "config")
     if not isinstance(specs, list) or not specs:
         raise ConfigError("config.evaluators must be a non-empty list")
-
-    built: list[Evaluator] = []
-    seen: set[str] = set()
-    for index, spec in enumerate(specs):
-        label = f"evaluators[{index}]"
-        mapping = _as_mapping(spec, label)
-        evaluator_type = _req_str(mapping, "type", label)
-        name = _opt_str(mapping, "name", label, default=None)
-
-        if evaluator_type == "exact_match":
-            evaluator: Evaluator = ExactMatch(
-                case_sensitive=_opt_bool(mapping, "case_sensitive", label, default=True),
-                name=name or "exact_match",
-            )
-        elif evaluator_type == "contains":
-            evaluator = Contains(
-                case_sensitive=_opt_bool(mapping, "case_sensitive", label, default=False),
-                name=name or "contains",
-            )
-        elif evaluator_type == "regex_match":
-            evaluator = RegexMatch(
-                pattern=_req_str(mapping, "pattern", label),
-                name=name or "regex_match",
-            )
-        else:
-            raise ConfigError(
-                f"{label}.type {evaluator_type!r} is not one of "
-                "['exact_match', 'contains', 'regex_match']"
-            )
-
-        if evaluator.name in seen:
-            raise ConfigError(f"duplicate evaluator name {evaluator.name!r}")
-        seen.add(evaluator.name)
-        built.append(evaluator)
-    return tuple(built)
+    return build_evaluators(specs)
 
 
 def _check_reference_outputs(evaluators: Sequence[Evaluator], dataset: Dataset) -> None:
@@ -239,27 +205,15 @@ def _build_providers(
     baseline: SystemVersion,
     candidate: SystemVersion,
 ) -> Mapping[ProviderName, ProviderClient]:
-    if backend == "mock":
-        # Deterministic simulation: MockProvider stands in for each declared identity.
-        return {name: MockProvider() for name in {baseline.provider, candidate.provider}}
-
-    # backend == "ollama": real local execution -- identities must actually be Ollama.
-    for label, version in (("baseline", baseline), ("candidate", candidate)):
-        if version.provider is not ProviderName.OLLAMA:
-            raise ConfigError(
-                f"execution.backend is 'ollama' but {label}.provider is "
-                f"{version.provider.value!r}; it must be 'ollama'"
-            )
-        build_options(version.parameters)  # reject unsupported generation params early
-
     execution = _as_mapping(root["execution"], "execution")
-    base_url = _opt_str(execution, "base_url", "execution", default=None) or DEFAULT_BASE_URL
-    timeout_seconds = _opt_number(
-        execution, "timeout_seconds", "execution", default=DEFAULT_TIMEOUT_SECONDS
+    spec = ExecutionSpec(
+        backend="ollama" if backend == "ollama" else "mock",
+        base_url=_opt_str(execution, "base_url", "execution", default=None) or DEFAULT_BASE_URL,
+        timeout_seconds=_opt_number(
+            execution, "timeout_seconds", "execution", default=DEFAULT_TIMEOUT_SECONDS
+        ),
     )
-    if timeout_seconds <= 0:
-        raise ConfigError("execution.timeout_seconds must be greater than 0")
-    return {ProviderName.OLLAMA: OllamaProvider(base_url=base_url, timeout_seconds=timeout_seconds)}
+    return build_providers(spec, baseline, candidate)
 
 
 # --- small typed parsing helpers -------------------------------------------------

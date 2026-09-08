@@ -15,6 +15,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from evalops.api.routes import ROUTERS
 from evalops.db import RecordConflict, session_factory
 from evalops.domain.errors import DomainValidationError
+from evalops.errors import ConfigError
 
 
 def create_app(sessions: sessionmaker[Session] | None = None) -> FastAPI:
@@ -28,6 +29,10 @@ def create_app(sessions: sessionmaker[Session] | None = None) -> FastAPI:
 
     @app.exception_handler(DomainValidationError)
     async def _on_domain_invalid(_: Request, exc: DomainValidationError) -> JSONResponse:
+        return JSONResponse(status_code=422, content={"detail": str(exc)})
+
+    @app.exception_handler(ConfigError)
+    async def _on_config_error(_: Request, exc: ConfigError) -> JSONResponse:
         return JSONResponse(status_code=422, content={"detail": str(exc)})
 
     for router in ROUTERS:

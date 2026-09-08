@@ -17,17 +17,24 @@ from evalops.api.deps import SessionDep
 from evalops.api.schemas import (
     DatasetCreate,
     DatasetRead,
+    EvaluationResultRead,
+    EvaluationRunRead,
     ExperimentCreate,
     ExperimentRead,
     ProjectCreate,
     ProjectRead,
     ReleasePolicyCreate,
     ReleasePolicyRead,
+    RunRequest,
+    RunResponse,
     SystemVersionCreate,
     SystemVersionRead,
 )
+from evalops.api.service import execute_experiment
 from evalops.db import (
     DatasetRepository,
+    EvaluationResultRepository,
+    EvaluationRunRepository,
     ExperimentRepository,
     ProjectRepository,
     ReleasePolicyRepository,
@@ -215,6 +222,36 @@ def get_experiment(experiment_id: str, session: SessionDep) -> ExperimentRead:
     return ExperimentRead.of(
         _found(ExperimentRepository(session).get(experiment_id), "experiment not found")
     )
+
+
+@experiments.post("/experiments/{experiment_id}/run", status_code=status.HTTP_201_CREATED)
+def run_experiment_route(experiment_id: str, body: RunRequest, session: SessionDep) -> RunResponse:
+    experiment = _found(ExperimentRepository(session).get(experiment_id), "experiment not found")
+    return execute_experiment(
+        session,
+        experiment,
+        body.execution.to_spec(),
+        [spec.model_dump(exclude_none=True) for spec in body.evaluators],
+    )
+
+
+@experiments.get("/experiments/{experiment_id}/runs")
+def list_experiment_runs(experiment_id: str, session: SessionDep) -> list[EvaluationRunRead]:
+    _found(ExperimentRepository(session).get(experiment_id), "experiment not found")
+    repo = EvaluationRunRepository(session)
+    return [
+        EvaluationRunRead.of(run, repo.get_case_result_for_run(run.id))
+        for run in repo.list_for_experiment(experiment_id)
+    ]
+
+
+@experiments.get("/experiments/{experiment_id}/results")
+def list_experiment_results(experiment_id: str, session: SessionDep) -> list[EvaluationResultRead]:
+    _found(ExperimentRepository(session).get(experiment_id), "experiment not found")
+    return [
+        EvaluationResultRead.of(result)
+        for result in EvaluationResultRepository(session).list_for_experiment(experiment_id)
+    ]
 
 
 ROUTERS = (projects, datasets, system_versions, release_policies, experiments)
