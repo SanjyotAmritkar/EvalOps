@@ -21,6 +21,9 @@ classifiers = [
 ]
 dependencies = [
     "pyyaml>=6",
+    "sqlalchemy>=2.0",
+    "alembic>=1.13",
+    "psycopg[binary]>=3.1",
 ]
 
 [project.scripts]
@@ -45,7 +48,8 @@ target-version = "py311"
 src = ["src", "tests"]
 # Ruff is our Python tool only; do not let the formatter rewrite Markdown
 # (notably docs/ARCHITECTURE.md, which is the product source of truth).
-extend-exclude = ["*.md"]
+# Alembic migration scripts are generated; only alembic/env.py is hand-written.
+extend-exclude = ["*.md", "alembic/versions"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
