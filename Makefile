@@ -1,4 +1,4 @@
-.PHONY: install lint fmt fmt-check type test check api
+.PHONY: install lint fmt fmt-check type test check api dashboard
 
 install:
 	uv sync
@@ -23,3 +23,7 @@ test:
 	uv run pytest
 
 check: lint fmt-check type test
+
+# Frontend dashboard (see dashboard/). Needs Node; run `npm ci` in dashboard/ once.
+dashboard:
+	cd dashboard && npm run check

@@ -30,5 +30,10 @@ htmlcov/
 *.swp
 .DS_Store
 
-# Node (future dashboard)
+# Node / dashboard (dashboard/ also has its own .gitignore)
 node_modules/
+dashboard/.next/
+dashboard/out/
+dashboard/coverage/
+dashboard/*.tsbuildinfo
+dashboard/.env*.local

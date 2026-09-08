@@ -123,7 +123,13 @@ a feature is listed under **SHIPPED** only if its full path actually works today
 ### NOT YET SHIPPED
 
 - Hosted provider execution — OpenAI, Anthropic
-- Evaluation execution via the API; dashboard
+- Evaluation execution via the API
+- Dashboard — the Next.js console in [dashboard/](dashboard/) covers browsing
+  projects, a per-project workspace (Overview, Datasets, System Versions,
+  Experiments, Release Policies), and creating / viewing datasets, system
+  versions, and release policies against the real API. Creating and running
+  experiments, and the results / comparison / release-decision views, are not
+  built yet
 - Statistical gating — bootstrap confidence intervals, significance, effect size
 - Production traces, RAG evaluation, agent evaluation, LLM-as-judge
 - Cloud deployment
@@ -198,8 +204,9 @@ bottleneck — the rationale and full diagram are in
 | CI | GitHub Actions |
 | Infra | Docker Compose locally -> one hosted instance |
 
-None of the backend / frontend / worker layers are implemented yet; the table
-describes the committed design, not current code.
+The backend (FastAPI + PostgreSQL) is implemented; the frontend is in progress
+(Projects screen only); the worker layer is future work. The table describes the
+committed design.
 
 ---
 
@@ -266,6 +273,22 @@ uv run uvicorn evalops.api.main:app --reload      # or: make api
 
 Interactive docs at `http://127.0.0.1:8000/docs`. The API is create/read/list
 only — it does not run evaluations yet.
+
+### Run the dashboard
+
+The web console lives in [dashboard/](dashboard/) (Next.js + TypeScript +
+Tailwind). It proxies `/api/*` to the FastAPI server above.
+
+```bash
+cd dashboard
+npm install                 # first time
+npm run dev                 # http://localhost:3000  -> /projects
+```
+
+Set `API_PROXY_TARGET` (see `dashboard/.env.example`) if the API is not on
+`http://127.0.0.1:8000`. Checks: `npm run check` (lint + typecheck + test +
+build); CI runs the same on Node 22. Implemented so far: the projects list, the
+per-project workspace, and dataset / system-version / release-policy management.
 
 ### Repository layout
 
