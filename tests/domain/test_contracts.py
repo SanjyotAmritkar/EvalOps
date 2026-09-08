@@ -7,7 +7,7 @@ behaviour, return types, and the ProviderError hierarchy.
 
 from __future__ import annotations
 
-from dataclasses import FrozenInstanceError
+from dataclasses import FrozenInstanceError, dataclass
 
 import pytest
 
@@ -76,11 +76,44 @@ class _EvaluatorMissingEvaluate:
     family = EvaluatorFamily.DETERMINISTIC
 
 
+@dataclass(frozen=True)
+class _FrozenProvider:
+    """A frozen implementation: name is a read-only field, not a settable attr."""
+
+    name: str = "frozen-provider"
+
+    def complete(self, prompt: str, config: SystemVersion) -> ProviderResponse:
+        return ProviderResponse(text=prompt, usage=UsageMetrics())
+
+
+@dataclass(frozen=True)
+class _FrozenEvaluator:
+    """A frozen implementation: name and family are read-only fields."""
+
+    name: str = "frozen-evaluator"
+    family: EvaluatorFamily = EvaluatorFamily.DETERMINISTIC
+
+    def evaluate(self, run: EvaluationRun, reference: DatasetCase) -> EvaluatorScore:
+        return EvaluatorScore(evaluator=self.name, family=self.family, score=1.0)
+
+
 def test_provider_client_conformance() -> None:
     client: ProviderClient = _FakeProvider()  # static structural check
 
     assert isinstance(client, ProviderClient)
     assert not isinstance(_ProviderMissingComplete(), ProviderClient)
+
+
+def test_read_only_implementations_satisfy_the_protocols() -> None:
+    # Frozen dataclasses expose name/family as read-only fields; the read-only
+    # protocol properties must accept them (static assignment + runtime check).
+    provider: ProviderClient = _FrozenProvider()
+    evaluator: Evaluator = _FrozenEvaluator()
+
+    assert isinstance(provider, ProviderClient)
+    assert isinstance(evaluator, Evaluator)
+    with pytest.raises(FrozenInstanceError):
+        provider.name = "changed"  # type: ignore[misc]
 
 
 def test_provider_complete_returns_a_provider_response() -> None:

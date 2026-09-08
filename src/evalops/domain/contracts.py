@@ -29,9 +29,14 @@ class ProviderResponse:
 
 @runtime_checkable
 class ProviderClient(Protocol):
-    """A synchronous client for one model provider."""
+    """A synchronous client for one model provider.
 
-    name: str
+    ``name`` is read-only descriptive metadata; an implementation may back it
+    with a plain attribute, a class attribute, a frozen field, or a property.
+    """
+
+    @property
+    def name(self) -> str: ...
 
     def complete(self, prompt: str, config: SystemVersion) -> ProviderResponse:
         """Return a completion for an already fully rendered ``prompt``.
@@ -44,10 +49,18 @@ class ProviderClient(Protocol):
 
 @runtime_checkable
 class Evaluator(Protocol):
-    """A synchronous scorer for one evaluation dimension."""
+    """A synchronous scorer for one evaluation dimension.
 
-    name: str
-    family: EvaluatorFamily
+    ``name`` and ``family`` are read-only descriptive metadata; an
+    implementation may back them with plain attributes, class attributes,
+    frozen fields, or properties.
+    """
+
+    @property
+    def name(self) -> str: ...
+
+    @property
+    def family(self) -> EvaluatorFamily: ...
 
     def evaluate(self, run: EvaluationRun, reference: DatasetCase) -> EvaluatorScore:
         """Score a single EvaluationRun against its reference DatasetCase."""
