@@ -16,6 +16,20 @@ from evalops.errors import ConfigError
 from evalops.runner import RunOutcome
 
 
+def expected_metric_names(evaluator_names: Sequence[str]) -> tuple[str, ...]:
+    """Metric names ``aggregate_results`` will produce, in the order it emits them.
+
+    Callers use this to validate a ReleasePolicy before any execution.
+    """
+    return (
+        "success_rate",
+        *(f"{name}.pass_rate" for name in evaluator_names),
+        "latency_ms.mean",
+        "latency_ms.p95",
+        "cost_usd.total",
+    )
+
+
 def aggregate_results(
     experiment: Experiment,
     outcome: RunOutcome,

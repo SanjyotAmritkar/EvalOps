@@ -72,38 +72,57 @@ dataset, so every fixed bug becomes a permanent test case:
 
 ## Development status
 
-**Pre–Phase 0 — repository initialization.** The repo currently contains project
-scaffolding only: packaging, tooling, CI, and design documentation. **No
-evaluation, provider, persistence, API, or UI functionality exists yet.** The
-full design and phase plan live in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md),
-which is the source of truth.
+**Phase 1 — core CLI evaluation loop (in progress).** `evalops run config.yaml`
+runs an offline, deterministic baseline-vs-candidate evaluation end to end. Real
+model providers are not wired yet: Phase 1 executes against a built-in
+deterministic **mock** provider, so every example metric is a synthetic test
+value, not real model output. The full design and phase plan live in
+[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md), which is the source of truth.
 
 The sections below follow the discipline required by `docs/ARCHITECTURE.md §13`:
 a feature is listed under **SHIPPED** only if its full path actually works today.
 
 ### SHIPPED (works today, verifiably)
 
-- `evalops` Python package skeleton (`src/` layout, typed, version metadata only
-  — no logic)
-- Dependency management with `uv` and a committed `uv.lock`
-- Lint + format (Ruff), type checking (mypy `--strict`), tests (pytest)
-- Pre-commit hooks and a `Makefile` of common tasks
-- GitHub Actions CI running lint, format check, type check, and tests on Python
-  3.11 and 3.12
-- Architecture & project reference document
+- **Repo & tooling** — `src/` layout package, `uv` + committed `uv.lock`, Ruff
+  (lint + format), mypy `--strict`, pytest, pre-commit, GitHub Actions CI on
+  Python 3.11 and 3.12
+- **Domain model** — frozen Project / Dataset / DatasetCase / SystemVersion /
+  Experiment / EvaluationRun / CaseResult / EvaluationResult / MetricComparison /
+  ReleasePolicy, plus the `Evaluator` and `ProviderClient` contracts
+- **JSONL evaluation datasets** — `load_jsonl` with line-numbered validation
+- **Deterministic offline execution** — a configurable built-in `MockProvider`
+  (exact rendered-prompt → response; synthetic token / latency / cost values);
+  no network, no randomness
+- **Deterministic evaluators** — `exact_match`, `contains`, `regex_match`
+- **Baseline vs candidate comparison** — synchronous runner producing
+  `EvaluationRun` / `CaseResult` records, with repeats and per-case failure
+  isolation
+- **Quality / cost / latency / reliability aggregation** — `success_rate`,
+  `<evaluator>.pass_rate`, `latency_ms.mean`, `latency_ms.p95`, `cost_usd.total`
+- **Release-policy gating** — fractional adverse-change thresholds, closed
+  metric-direction rules, explicit zero-baseline handling, PASS / BLOCK
+- **`evalops run`** — YAML config, human report on stdout, stable `--json`
+  result output, exit codes `0` (pass) / `1` (block) / `2` (error)
+- Worked example: [examples/support/](examples/support/) — `regression.yaml`
+  BLOCKs on a latency budget while quality improves; `fixed.yaml` PASSes
 
-There is intentionally **no `evalops` command yet.**
+### NOT YET SHIPPED
 
-### COMMITTED (current milestone — Phase 0)
+- Real provider execution — OpenAI, Anthropic
+- **Ollama** (local inference) — Phase 1 Checkpoint 6, next
+- Persistence, API, dashboard
+- Statistical gating — bootstrap confidence intervals, significance, effect size
+- Production traces, RAG evaluation, agent evaluation, LLM-as-judge
 
-Freeze the core contracts, with no UI, no persistence, and no live model calls:
+`MockProvider` is **not** real model inference — it is deterministic test
+infrastructure for offline development and CI.
 
-- Data model: Project, Dataset, DatasetCase, SystemVersion, Experiment,
-  EvaluationRun, CaseResult, EvaluationResult, ReleasePolicy
-- `Evaluator` interface (one contract for deterministic, statistical, and
-  LLM-judge evaluators)
-- `ProviderClient` interface (one contract for all model calls)
-- Exit criterion: schema and interfaces reviewed and stable
+### COMMITTED (current milestone — finish Phase 1)
+
+- Checkpoint 6: a real `OllamaProvider` (local, no API key) proving the provider
+  abstraction against genuine model execution — without making CI depend on
+  Ollama being installed or running
 
 ### ROADMAP (planned next, in order)
 
@@ -198,12 +217,25 @@ Common tasks (`make <target>`, or the underlying command):
 CI runs the same lint, format, type, and test checks on Python 3.11 and 3.12 for
 every push to `main` and every pull request.
 
-There is no application to run yet. The `evalops` CLI arrives in Phase 1.
+### Run an evaluation
+
+Fully offline and deterministic — no API keys, no network:
+
+```bash
+uv run evalops run examples/support/regression.yaml        # -> BLOCK, exit 1
+uv run evalops run examples/support/fixed.yaml             # -> PASS,  exit 0
+uv run evalops run examples/support/fixed.yaml --json - --quiet   # JSON only
+```
+
+`--json PATH` also writes the machine-readable result to a file. All numbers in
+the examples come from the built-in deterministic mock provider, not a real
+model.
 
 ### Repository layout
 
 ```
-src/evalops/      Python package (skeleton; subpackages added per phase)
+src/evalops/      Python package (domain model + Phase 1 CLI loop)
+examples/         runnable offline example configs
 tests/            test suite
 docs/             architecture & project reference
 .github/          CI workflows

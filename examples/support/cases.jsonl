@@ -1,0 +1,4 @@
+{"input": "What is the capital of France?", "expected_output": "Paris", "id": "capital-fr"}
+{"input": "What is 2 + 2?", "expected_output": "4", "id": "math-1"}
+{"input": "Which planet is known as the Red Planet?", "expected_output": "Mars", "id": "planet-mars"}
+{"input": "What color is a clear daytime sky?", "expected_output": "blue", "id": "sky-color"}

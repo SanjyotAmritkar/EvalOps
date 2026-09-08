@@ -19,7 +19,12 @@ classifiers = [
     "Topic :: Software Development :: Testing",
     "Typing :: Typed",
 ]
-dependencies = []
+dependencies = [
+    "pyyaml>=6",
+]
+
+[project.scripts]
+evalops = "evalops.cli:main"
 
 [dependency-groups]
 dev = [
@@ -28,6 +33,7 @@ dev = [
     "ruff>=0.6",
     "mypy>=1.11",
     "pre-commit>=3.8",
+    "types-pyyaml>=6",
 ]
 
 [tool.hatch.build.targets.wheel]
