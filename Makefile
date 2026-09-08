@@ -1,7 +1,11 @@
-.PHONY: install lint fmt fmt-check type test check
+.PHONY: install lint fmt fmt-check type test check api
 
 install:
 	uv sync
+
+# Run the read/write API locally (needs DATABASE_URL + `alembic upgrade head`).
+api:
+	uv run uvicorn evalops.api.main:app --reload
 
 lint:
 	uv run ruff check .

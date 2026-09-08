@@ -114,11 +114,16 @@ a feature is listed under **SHIPPED** only if its full path actually works today
   BLOCKs on a latency budget while quality improves; `fixed.yaml` PASSes;
   `ollama.yaml` is a real local smoke run, verified end to end against a local
   Ollama server (PASS, 4 cases / 8 runs / 0 failures), outside CI
+- **Persistence** — PostgreSQL schema (SQLAlchemy 2.x + Alembic), domain↔ORM
+  mapping, and repositories with a unit-of-work
+- **Read/write API** — a small FastAPI app (`evalops.api.main:app`) over the
+  repositories: create/read/list for projects, datasets, system versions,
+  release policies, and experiments. No evaluation execution through the API yet.
 
 ### NOT YET SHIPPED
 
 - Hosted provider execution — OpenAI, Anthropic
-- Persistence, API, dashboard
+- Evaluation execution via the API; dashboard
 - Statistical gating — bootstrap confidence intervals, significance, effect size
 - Production traces, RAG evaluation, agent evaluation, LLM-as-judge
 - Cloud deployment
@@ -247,6 +252,20 @@ uv run evalops run examples/support/ollama.yaml
 
 Outputs and latency are then real and vary between runs. This path is not
 exercised by CI.
+
+### Run the API
+
+Requires a PostgreSQL database. Point `DATABASE_URL` at it (see
+[.env.example](.env.example)), apply the schema, then start the app:
+
+```bash
+export DATABASE_URL=postgresql+psycopg://evalops:evalops@localhost:5432/evalops
+uv run alembic upgrade head
+uv run uvicorn evalops.api.main:app --reload      # or: make api
+```
+
+Interactive docs at `http://127.0.0.1:8000/docs`. The API is create/read/list
+only — it does not run evaluations yet.
 
 ### Repository layout
 
