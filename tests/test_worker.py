@@ -84,6 +84,14 @@ def test_enqueue_runs_job_to_completion_and_links_result(
         runs = EvaluationRunRepository(session).list_for_experiment(runnable_experiment)
     assert [r.id for r in results] == [job.evaluation_result_id]
     assert len(runs) == 4
+    # CP 5.2: the async path persists statistical evidence like the sync path
+    assert [e.metric for e in results[0].evidence] == [
+        "success_rate",
+        "contains.pass_rate",
+        "latency_ms.mean",
+        "cost_usd.mean",
+    ]
+    assert all(e.method == "paired_bootstrap_percentile" for e in results[0].evidence)
 
 
 def test_task_marks_job_failed_and_persists_no_evaluation_data(

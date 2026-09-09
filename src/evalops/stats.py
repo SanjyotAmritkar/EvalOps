@@ -25,13 +25,25 @@ import statistics
 from collections.abc import Sequence
 from dataclasses import dataclass
 from math import ceil, floor
-from typing import Literal
 
 from evalops.domain.entities import CaseResult, EvaluationRun, Experiment
+from evalops.domain.value_objects import MetricEvidence, MetricKind, SampleSummary
 from evalops.errors import ConfigError
 from evalops.runner import RunOutcome
 
-MetricKind = Literal["binary", "continuous"]
+# Re-exported for callers that import these from evalops.stats (they are defined
+# in the domain so an EvaluationResult can carry them; the maths stays here).
+__all__ = [
+    "MetricEvidence",
+    "MetricKind",
+    "PairedSeries",
+    "SampleSummary",
+    "build_statistical_evidence",
+    "metric_evidence",
+    "paired_bootstrap_ci",
+    "paired_observations",
+    "summarize",
+]
 
 #: Default two-sided confidence level for the bootstrap interval.
 DEFAULT_CONFIDENCE_LEVEL = 0.95
@@ -47,16 +59,6 @@ BOOTSTRAP_METHOD = "paired_bootstrap_percentile"
 
 
 # --- descriptive summaries -------------------------------------------------
-
-
-@dataclass(frozen=True, slots=True)
-class SampleSummary:
-    """Descriptive statistics for one series of per-pair observations."""
-
-    n: int
-    mean: float
-    median: float
-    stdev: float  # sample standard deviation (ddof=1); 0.0 when n < 2
 
 
 def summarize(values: Sequence[float]) -> SampleSummary:
@@ -309,34 +311,6 @@ def paired_bootstrap_ci(
 
 
 # --- evidence -----------------------------------------------------------
-
-
-@dataclass(frozen=True, slots=True)
-class MetricEvidence:
-    """Statistical evidence for one metric's baseline->candidate change.
-
-    Suitable for later release gating / API output. ``ci_excludes_zero`` is the
-    mechanical property of the interval and is only meaningful when
-    ``insufficient_evidence`` is ``False``.
-    """
-
-    metric: str
-    kind: MetricKind
-    n_pairs: int
-    baseline: SampleSummary
-    candidate: SampleSummary
-    paired_delta: SampleSummary  # summary of (candidate_i - baseline_i)
-    delta: float  # candidate.mean - baseline.mean (== paired_delta.mean)
-    relative_change: float | None  # delta / baseline.mean; None if baseline.mean == 0
-    confidence_level: float
-    ci_low: float | None
-    ci_high: float | None
-    ci_excludes_zero: bool
-    insufficient_evidence: bool
-    method: str
-    resamples: int
-    seed: int
-    dropped_provider_failures: int
 
 
 def metric_evidence(

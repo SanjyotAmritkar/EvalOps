@@ -15,6 +15,7 @@ from datetime import datetime
 from typing import Any
 
 from sqlalchemy import (
+    BigInteger,
     CheckConstraint,
     DateTime,
     Enum,
@@ -268,6 +269,12 @@ class EvaluationResult(Base):
         order_by="MetricComparison.position",
         passive_deletes=True,
     )
+    evidence: Mapped[list[MetricEvidence]] = relationship(
+        back_populates="evaluation_result",
+        cascade="all, delete-orphan",
+        order_by="MetricEvidence.position",
+        passive_deletes=True,
+    )
 
 
 class AsyncJob(Base):
@@ -313,3 +320,55 @@ class MetricComparison(Base):
     candidate_value: Mapped[float] = mapped_column(Float, nullable=False)
 
     evaluation_result: Mapped[EvaluationResult] = relationship(back_populates="metrics")
+
+
+class MetricEvidence(Base):
+    """Per-metric paired-bootstrap statistical evidence for an EvaluationResult
+    (Phase 5). Flat columns, like ``metric_comparison`` -- the three
+    ``SampleSummary`` value objects (baseline / candidate / paired-delta) are
+    flattened onto ``*_mean`` / ``*_median`` / ``*_stdev``; their ``n`` is
+    always ``n_pairs``."""
+
+    __tablename__ = "metric_evidence"
+    __table_args__ = (
+        UniqueConstraint("evaluation_result_id", "position"),
+        CheckConstraint("kind IN ('binary', 'continuous')", name="kind_known"),
+        CheckConstraint("n_pairs >= 0", name="n_pairs_nonneg"),
+        CheckConstraint("dropped_provider_failures >= 0", name="dropped_nonneg"),
+        CheckConstraint(
+            "confidence_level > 0.0 AND confidence_level < 1.0", name="confidence_level_unit"
+        ),
+    )
+
+    evaluation_result_id: Mapped[str] = mapped_column(
+        String(ID_LENGTH),
+        ForeignKey("evaluation_result.id", ondelete="CASCADE"),
+        primary_key=True,
+        index=True,
+    )
+    metric: Mapped[str] = mapped_column(String(200), primary_key=True)
+    position: Mapped[int] = mapped_column(Integer, nullable=False)
+    kind: Mapped[str] = mapped_column(String(16), nullable=False)
+    n_pairs: Mapped[int] = mapped_column(Integer, nullable=False)
+    baseline_mean: Mapped[float] = mapped_column(Float, nullable=False)
+    baseline_median: Mapped[float] = mapped_column(Float, nullable=False)
+    baseline_stdev: Mapped[float] = mapped_column(Float, nullable=False)
+    candidate_mean: Mapped[float] = mapped_column(Float, nullable=False)
+    candidate_median: Mapped[float] = mapped_column(Float, nullable=False)
+    candidate_stdev: Mapped[float] = mapped_column(Float, nullable=False)
+    paired_delta_mean: Mapped[float] = mapped_column(Float, nullable=False)
+    paired_delta_median: Mapped[float] = mapped_column(Float, nullable=False)
+    paired_delta_stdev: Mapped[float] = mapped_column(Float, nullable=False)
+    delta: Mapped[float] = mapped_column(Float, nullable=False)
+    relative_change: Mapped[float | None] = mapped_column(Float, nullable=True)
+    confidence_level: Mapped[float] = mapped_column(Float, nullable=False)
+    ci_low: Mapped[float | None] = mapped_column(Float, nullable=True)
+    ci_high: Mapped[float | None] = mapped_column(Float, nullable=True)
+    ci_excludes_zero: Mapped[bool] = mapped_column(nullable=False)
+    insufficient_evidence: Mapped[bool] = mapped_column(nullable=False)
+    dropped_provider_failures: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    method: Mapped[str] = mapped_column(String(64), nullable=False)
+    resamples: Mapped[int] = mapped_column(Integer, nullable=False)
+    seed: Mapped[int] = mapped_column(BigInteger, nullable=False)
+
+    evaluation_result: Mapped[EvaluationResult] = relationship(back_populates="evidence")

@@ -163,3 +163,11 @@ def test_http_and_direct_execution_produce_equivalent_summaries(
     assert {m["metric"] for m in via_http["metrics"]} == {
         m["metric"] for m in via_service["metrics"]
     }
+    # CP 5.2: the statistical view is identical on both execution paths
+    assert via_http["advisories"] == via_service["advisories"]
+    assert [e["metric"] for e in via_http["evidence"]] == [
+        e["metric"] for e in via_service["evidence"]
+    ]
+    assert [m["gate_outcome"] for m in via_http["metrics"]] == [
+        m["gate_outcome"] for m in via_service["metrics"]
+    ]

@@ -31,7 +31,14 @@ from evalops.domain.enums import (
 )
 from evalops.domain.errors import DomainValidationError, EvalOpsError
 from evalops.domain.ids import EntityId, new_id
-from evalops.domain.value_objects import EvaluatorScore, MetricComparison, UsageMetrics
+from evalops.domain.value_objects import (
+    EvaluatorScore,
+    MetricComparison,
+    MetricEvidence,
+    MetricKind,
+    SampleSummary,
+    UsageMetrics,
+)
 
 __all__ = [
     "AsyncJob",
@@ -50,6 +57,8 @@ __all__ = [
     "Experiment",
     "JobStatus",
     "MetricComparison",
+    "MetricEvidence",
+    "MetricKind",
     "Project",
     "ProviderClient",
     "ProviderError",
@@ -57,6 +66,7 @@ __all__ = [
     "ProviderResponse",
     "ReleaseDecision",
     "ReleasePolicy",
+    "SampleSummary",
     "SystemVersion",
     "UsageMetrics",
     "new_id",

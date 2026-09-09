@@ -28,6 +28,7 @@ def _setup(
     candidate_fails: bool = False,
     policy: dict[str, Any] | None = None,
     expected_output: str | None = "4",
+    repeats: int = 2,
 ) -> str:
     """Create project/dataset/versions/experiment; return the experiment id."""
     project_id = client.post("/projects", json={"name": "P"}).json()["id"]
@@ -61,7 +62,7 @@ def _setup(
         "dataset_id": dataset_id,
         "baseline_version_id": baseline_id,
         "candidate_version_id": candidate_id,
-        "repeats": 2,
+        "repeats": repeats,
     }
     if policy is not None:
         policy_id = client.post("/release-policies", json=policy).json()["id"]
@@ -209,7 +210,16 @@ def test_provider_failure_is_recorded_not_a_500(client: TestClient) -> None:
     assert response.status_code == 201  # not a server error
     body = response.json()
     assert body["counts"]["failures"] == 2  # candidate's case fails on both repeats
-    assert body["decision"] == "block"  # success_rate dropped below the (0%) tolerance
+
+    # CP 5.2: success_rate breaches the 0% tolerance at the point estimate, but
+    # only 2 paired samples exist -- not enough evidence to statistically BLOCK.
+    # The breach is surfaced as an advisory; the release still PASSES.
+    assert body["decision"] == "pass"
+    sr = next(m for m in body["metrics"] if m["metric"] == "success_rate")
+    assert sr["gate_outcome"] == "regression_low_evidence"
+    assert sr["regression"] is False
+    assert any("success_rate" in a and "insufficient evidence" in a for a in body["advisories"])
+    assert body["reasons"] == []
 
     runs = client.get(f"/experiments/{experiment_id}/runs").json()
     failed = [run for run in runs if run["error"] is not None]
@@ -275,3 +285,110 @@ def test_exact_match_without_expected_output_is_422_and_persists_nothing(
 
     assert response.status_code == 422
     assert client.get(f"/experiments/{experiment_id}/runs").json() == []
+
+
+# --- CP 5.2: statistical evidence in the API + statistical gating ---------
+
+
+def _summaries_look_like(evidence_entry: dict[str, Any]) -> None:
+    for key in ("baseline", "candidate", "paired_delta"):
+        summary = evidence_entry[key]
+        assert set(summary) == {"n", "mean", "median", "stdev"}
+        assert summary["n"] == evidence_entry["n_pairs"]
+
+
+def test_run_response_carries_statistical_evidence_that_survives_refresh(
+    client: TestClient,
+) -> None:
+    experiment_id = _setup(client, policy={"name": "p", "thresholds": {"latency_ms.p95": 0.5}})
+    body = _run(client, experiment_id, [{"type": "contains", "case_sensitive": False}]).json()
+
+    assert body["decision"] == "pass"
+    ev_by_metric = {e["metric"]: e for e in body["evidence"]}
+    # evidence for every metric a paired bootstrap is well-defined for; note
+    # cost is reported as cost_usd.mean (the gate keys cost_usd.total, which
+    # stays a deterministic point metric with no evidence).
+    assert set(ev_by_metric) == {
+        "success_rate",
+        "contains.pass_rate",
+        "latency_ms.mean",
+        "cost_usd.mean",
+    }
+    lat = ev_by_metric["latency_ms.mean"]
+    assert lat["kind"] == "continuous"
+    assert lat["n_pairs"] == 2  # 1 case x 2 repeats
+    assert lat["confidence_level"] == 0.95
+    assert lat["method"] == "paired_bootstrap_percentile"
+    assert lat["insufficient_evidence"] is True  # < 3 pairs -> no CI
+    assert lat["ci_low"] is None and lat["ci_high"] is None
+    _summaries_look_like(lat)
+    for m in body["metrics"]:
+        assert m["gate_outcome"] == "pass"
+
+    # persisted results recompute identically -> evidence + advisories survive refresh
+    result = client.get(f"/experiments/{experiment_id}/results").json()[0]
+    assert result["evidence"] == body["evidence"]
+    assert result["advisories"] == body["advisories"]
+    assert result["decision"] == body["decision"]
+    assert result["reasons"] == body["reasons"]
+
+
+def test_statistically_confirmed_regression_blocks_and_recomputes_the_same(
+    client: TestClient,
+) -> None:
+    # 8 repeats -> 8 paired samples (>= the gate minimum); the candidate fails
+    # every call, so success_rate drops from 1.0 to 0.0 with a degenerate CI of
+    # exactly [-1, -1] -- past the 0% tolerated boundary -> a real BLOCK.
+    experiment_id = _setup(
+        client,
+        candidate_fails=True,
+        repeats=8,
+        policy={"name": "p", "thresholds": {"success_rate": 0.0}},
+    )
+    body = _run(client, experiment_id, [{"type": "contains"}]).json()
+
+    assert body["decision"] == "block"
+    assert any("success_rate" in r for r in body["reasons"])
+    assert body["advisories"] == []
+    sr_line = next(m for m in body["metrics"] if m["metric"] == "success_rate")
+    assert sr_line["gate_outcome"] == "regression" and sr_line["regression"] is True
+    sr_ev = next(e for e in body["evidence"] if e["metric"] == "success_rate")
+    assert sr_ev["n_pairs"] == 8
+    assert (sr_ev["ci_low"], sr_ev["ci_high"]) == (-1.0, -1.0)
+    assert sr_ev["insufficient_evidence"] is False
+
+    # GET /results recomputes the decision from persisted evidence -> identical
+    result = client.get(f"/experiments/{experiment_id}/results").json()[0]
+    assert result["decision"] == "block"
+    assert result["reasons"] == body["reasons"]
+    assert result["advisories"] == body["advisories"]
+    assert result["evidence"] == body["evidence"]
+    blocking = [m["metric"] for m in result["metrics"] if m["regression"]]
+    assert blocking == ["success_rate"]
+
+
+def test_inconclusive_breach_passes_with_advisory_and_survives_refresh(
+    client: TestClient,
+) -> None:
+    # p95 latency doubles (deterministic) but is NOT gated here; latency_ms.mean
+    # IS gated and breaches, yet with only 2 pairs it is low-evidence -> PASS.
+    experiment_id = _setup(
+        client,
+        baseline_latency=40,
+        candidate_latency=90,
+        policy={"name": "p", "thresholds": {"latency_ms.mean": 0.2}},
+    )
+    body = _run(client, experiment_id, [{"type": "contains"}]).json()
+
+    assert body["decision"] == "pass"
+    assert body["reasons"] == []
+    assert any("latency_ms.mean" in a for a in body["advisories"])
+    mean_line = next(m for m in body["metrics"] if m["metric"] == "latency_ms.mean")
+    assert mean_line["gate_outcome"] == "regression_low_evidence"
+    assert mean_line["regression"] is False
+    assert mean_line["threshold"] == 0.2
+
+    result = client.get(f"/experiments/{experiment_id}/results").json()[0]
+    assert result["decision"] == "pass"
+    assert result["advisories"] == body["advisories"]
+    assert result["evidence"] == body["evidence"]

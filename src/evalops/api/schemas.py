@@ -233,6 +233,63 @@ class MetricLineRead(BaseModel):
     threshold: float | None
     adverse_change: float | None
     regression: bool
+    # CP 5.2: `regression` still drives BLOCK. `gate_outcome` distinguishes a
+    # blocking regression from a threshold breach held back by weak/inconclusive
+    # statistical evidence: "pass" | "regression" | "regression_inconclusive" |
+    # "regression_low_evidence".
+    gate_outcome: str = "pass"
+
+
+class SampleSummaryRead(BaseModel):
+    n: int
+    mean: float
+    median: float
+    stdev: float
+
+
+class MetricEvidenceRead(BaseModel):
+    """Persisted paired-bootstrap evidence for one statistically supported
+    metric (CP 5.2). Present for success_rate, evaluator pass-rates, and
+    latency_ms.mean; absent for latency_ms.p95 / cost_usd.total."""
+
+    metric: str
+    kind: str
+    n_pairs: int
+    baseline: SampleSummaryRead
+    candidate: SampleSummaryRead
+    paired_delta: SampleSummaryRead
+    delta: float
+    relative_change: float | None
+    confidence_level: float
+    ci_low: float | None
+    ci_high: float | None
+    ci_excludes_zero: bool
+    insufficient_evidence: bool
+    dropped_provider_failures: int
+    method: str
+
+    @classmethod
+    def of(cls, value: domain.MetricEvidence) -> MetricEvidenceRead:
+        def _summary(s: domain.SampleSummary) -> SampleSummaryRead:
+            return SampleSummaryRead(n=s.n, mean=s.mean, median=s.median, stdev=s.stdev)
+
+        return cls(
+            metric=value.metric,
+            kind=value.kind,
+            n_pairs=value.n_pairs,
+            baseline=_summary(value.baseline),
+            candidate=_summary(value.candidate),
+            paired_delta=_summary(value.paired_delta),
+            delta=value.delta,
+            relative_change=value.relative_change,
+            confidence_level=value.confidence_level,
+            ci_low=value.ci_low,
+            ci_high=value.ci_high,
+            ci_excludes_zero=value.ci_excludes_zero,
+            insufficient_evidence=value.insufficient_evidence,
+            dropped_provider_failures=value.dropped_provider_failures,
+            method=value.method,
+        )
 
 
 class RunResponse(BaseModel):
@@ -247,6 +304,9 @@ class RunResponse(BaseModel):
     gated: bool
     reasons: list[str]
     metrics: list[MetricLineRead]
+    # CP 5.2 -- additive, backward compatible.
+    advisories: list[str] = []
+    evidence: list[MetricEvidenceRead] = []
 
     @classmethod
     def of(
@@ -288,9 +348,12 @@ class RunResponse(BaseModel):
                     threshold=verdicts[mc.metric].threshold,
                     adverse_change=verdicts[mc.metric].adverse_change,
                     regression=verdicts[mc.metric].regression,
+                    gate_outcome=verdicts[mc.metric].outcome,
                 )
                 for mc in result.metrics
             ],
+            advisories=list(gate.advisories),
+            evidence=[MetricEvidenceRead.of(e) for e in result.evidence],
         )
 
 
@@ -372,6 +435,10 @@ class EvaluationResultRead(BaseModel):
     gated: bool
     reasons: list[str]
     metrics: list[MetricLineRead]
+    # CP 5.2 -- additive, backward compatible. Persisted evidence + recomputed
+    # advisories survive a page refresh identically to the sync RunResponse.
+    advisories: list[str] = []
+    evidence: list[MetricEvidenceRead] = []
 
     @classmethod
     def of(cls, value: domain.EvaluationResult, gate: GateReport) -> EvaluationResultRead:
@@ -394,9 +461,12 @@ class EvaluationResultRead(BaseModel):
                     threshold=verdicts[mc.metric].threshold,
                     adverse_change=verdicts[mc.metric].adverse_change,
                     regression=verdicts[mc.metric].regression,
+                    gate_outcome=verdicts[mc.metric].outcome,
                 )
                 for mc in value.metrics
             ],
+            advisories=list(gate.advisories),
+            evidence=[MetricEvidenceRead.of(e) for e in value.evidence],
         )
 
 

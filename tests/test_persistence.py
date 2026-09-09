@@ -364,6 +364,95 @@ def test_evaluation_result_round_trip_preserves_metric_order(
     assert [r.id for r in for_exp] == [result.id]
 
 
+def test_evaluation_result_round_trip_preserves_statistical_evidence(
+    sessions: Sessions, graph: Graph
+) -> None:
+    """CP 5.2: MetricEvidence (incl. None CIs and the three SampleSummary
+    sub-objects) reconstructs faithfully, in order, from its own child table."""
+
+    def _summary(n: int, mean: float, stdev: float) -> domain.SampleSummary:
+        return domain.SampleSummary(n=n, mean=mean, median=mean, stdev=stdev)
+
+    supported = domain.MetricEvidence(
+        metric="success_rate",
+        kind="binary",
+        n_pairs=10,
+        baseline=_summary(10, 1.0, 0.0),
+        candidate=_summary(10, 0.6, 0.49),
+        paired_delta=_summary(10, -0.4, 0.51),
+        delta=-0.4,
+        relative_change=-0.4,
+        confidence_level=0.95,
+        ci_low=-0.55,
+        ci_high=-0.25,
+        ci_excludes_zero=True,
+        insufficient_evidence=False,
+        method="paired_bootstrap_percentile",
+        resamples=2000,
+        seed=0x5EED0501,
+        dropped_provider_failures=1,
+    )
+    low_evidence = domain.MetricEvidence(
+        metric="contains.pass_rate",
+        kind="binary",
+        n_pairs=2,
+        baseline=_summary(2, 1.0, 0.0),
+        candidate=_summary(2, 1.0, 0.0),
+        paired_delta=_summary(2, 0.0, 0.0),
+        delta=0.0,
+        relative_change=0.0,
+        confidence_level=0.95,
+        ci_low=None,
+        ci_high=None,
+        ci_excludes_zero=False,
+        insufficient_evidence=True,
+        method="paired_bootstrap_percentile",
+        resamples=2000,
+        seed=0x5EED0502,
+    )
+    result = domain.EvaluationResult(
+        experiment_id=graph.experiment.id,
+        metrics=(
+            domain.MetricComparison(metric="success_rate", baseline_value=1.0, candidate_value=0.6),
+            domain.MetricComparison(
+                metric="contains.pass_rate", baseline_value=1.0, candidate_value=1.0
+            ),
+        ),
+        evidence=(supported, low_evidence),
+    )
+
+    with unit_of_work(sessions) as session:
+        EvaluationResultRepository(session).add(result)
+
+    with unit_of_work(sessions) as session:
+        loaded = EvaluationResultRepository(session).get(result.id)
+
+    assert loaded is not None
+    assert loaded == result  # full structural equality, evidence included
+    assert [e.metric for e in loaded.evidence] == ["success_rate", "contains.pass_rate"]
+    assert loaded.evidence[0].ci_low == -0.55 and loaded.evidence[0].dropped_provider_failures == 1
+    assert loaded.evidence[1].ci_low is None and loaded.evidence[1].insufficient_evidence is True
+
+
+def test_evaluation_result_without_evidence_still_round_trips(
+    sessions: Sessions, graph: Graph
+) -> None:
+    """Backward compatibility: a pre-Phase-5 result (no evidence) is unchanged."""
+    result = domain.EvaluationResult(
+        experiment_id=graph.experiment.id,
+        metrics=(
+            domain.MetricComparison(metric="success_rate", baseline_value=1.0, candidate_value=1.0),
+        ),
+    )
+    with unit_of_work(sessions) as session:
+        EvaluationResultRepository(session).add(result)
+    with unit_of_work(sessions) as session:
+        loaded = EvaluationResultRepository(session).get(result.id)
+
+    assert loaded == result
+    assert loaded is not None and loaded.evidence == ()
+
+
 # --- conflict & rollback behaviour ------------------------------------
 
 

@@ -242,6 +242,73 @@ CIs are reproducible in tests and stored results. `latency_ms.p95` and
 `cost_usd.total` stay point-only for now (a paired bootstrap of a percentile /
 total at small N is not defensible).
 
+### 8.2 Statistical release gating (Phase 5, CP 5.2)
+
+`evaluate_gate` reads `EvaluationResult.evidence` directly (no separate
+argument), so the synchronous `/run`, the Celery worker, and the `GET
+/results` recompute all gate identically. The **policy threshold still defines
+the maximum tolerated adverse effect**; the statistical evidence only decides
+whether a *breach* is trustworthy enough to BLOCK.
+
+**Direction (closed mapping).** `success_rate` and `<evaluator>.pass_rate` are
+higher-is-better; `latency_ms.mean`, `latency_ms.p95`, `cost_usd.total` are
+lower-is-better. Adverse change is a *decrease* for higher-is-better and an
+*increase* for lower-is-better, expressed as a fraction of the baseline
+(matching the pre-Phase-5 point gate).
+
+**Per-metric outcome.** For each gated `MetricComparison`:
+
+1. `threshold_breached` — the point adverse change exceeds the policy
+   threshold (unchanged deterministic test; a lower-is-better metric rising
+   from a zero baseline is an unbounded breach).
+2. If not breached → `pass`.
+3. If breached and the metric has **no** `MetricEvidence` (`latency_ms.p95`,
+   `cost_usd.total`) → `regression` → **BLOCK** (pre-Phase-5 behaviour, intact).
+4. If breached and `n_pairs < MIN_PAIRS_TO_BLOCK` (8) or the bootstrap produced
+   no CI → `regression_low_evidence` → **does not block** (advisory).
+5. If breached, enough pairs, and the delta CI lies **entirely on the adverse
+   side of the tolerated boundary** → `regression` → **BLOCK**.
+6. Otherwise → `regression_inconclusive` → **does not block** (advisory).
+
+**CI vs. the tolerated boundary** (not vs. zero — `ci_excludes_zero` alone is
+never used). With `ref = evidence.baseline.mean` and tolerated fraction `t`:
+
+| direction | tolerated boundary on `delta = candidate.mean − baseline.mean` | confirms a regression when |
+|---|---|---|
+| higher_is_better | `delta ≥ −t·ref` | `ci_high < −t·ref` |
+| lower_is_better | `delta ≤ +t·ref` | `ci_low > +t·ref` |
+
+**Minimum pairs.** `gate.MIN_PAIRS_TO_BLOCK = 8`, a fixed constant this phase
+(distinct from `stats.MIN_PAIRS_FOR_CI = 3`, the floor for computing any CI at
+all). A paired percentile bootstrap needs enough distinct pairs that its tail
+quantiles reflect a distribution rather than one or two runs; 8 (e.g. 4 cases ×
+2 repeats, or 8 × 1) is deliberately conservative. It is not a `ReleasePolicy`
+field because `thresholds` is a flat `metric → float` map — a per-policy knob
+would need a domain field, a column and a migration, exceeding "very little
+complexity". Teams gain power by raising `repeats` or dataset size.
+
+**Decision, reasons, advisories.** The release BLOCKs iff any verdict is
+`regression`. `GateReport.reasons` lists only those (unchanged strings, so the
+CLI/report output and existing consumers are unaffected). `GateReport.advisories`
+is new: one line per `regression_inconclusive` / `regression_low_evidence`
+breach, so a threshold breach that statistics could not confirm is surfaced
+loudly while the release still PASSes. `MetricLineRead.gate_outcome` carries the
+per-metric outcome; `regression` (the field driving BLOCK) is unchanged.
+
+**Persistence / API.** Evidence is stored in a flat `metric_evidence` child
+table of `evaluation_result` (like `metric_comparison`; the three
+`SampleSummary` value objects are flattened to `*_mean` / `*_median` /
+`*_stdev`, their `n` is always `n_pairs`). `RunResponse` and
+`EvaluationResultRead` gain additive `advisories: []` and
+`evidence: [MetricEvidenceRead]`; `GET /results` reconstructs `MetricEvidence`
+from the table and recomputes an identical decision, so evidence and the
+statistical verdict survive a page refresh.
+
+**CLI.** `evalops run` stays a deterministic point-comparison gate
+(`aggregate_results` produces no evidence, so `evaluate_gate` takes the
+deterministic path). Statistical gating applies to the persisted execution
+path only.
+
 ---
 
 ## 9. Judge Calibration Methodology

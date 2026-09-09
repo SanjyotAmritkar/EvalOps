@@ -17,7 +17,12 @@ from evalops.domain._time import utcnow
 from evalops.domain.enums import CaseOrigin, JobStatus, ProviderName
 from evalops.domain.errors import DomainValidationError
 from evalops.domain.ids import new_id
-from evalops.domain.value_objects import EvaluatorScore, MetricComparison, UsageMetrics
+from evalops.domain.value_objects import (
+    EvaluatorScore,
+    MetricComparison,
+    MetricEvidence,
+    UsageMetrics,
+)
 
 
 def _require_non_empty(value: str, label: str) -> None:
@@ -246,14 +251,17 @@ class CaseResult:
 
 @dataclass(frozen=True, slots=True)
 class EvaluationResult:
-    """Experiment-level comparison: one MetricComparison per named metric.
+    """Experiment-level comparison: one MetricComparison per named metric, plus
+    optional per-metric statistical ``evidence`` (Phase 5).
 
-    Representation only. Aggregation from CaseResults and any release decision
-    are produced by later phases, not stored or computed here.
+    Representation only. Aggregation from CaseResults, the statistical evidence,
+    and any release decision are produced by later phases, not computed here.
+    ``evidence`` defaults to empty so pre-Phase-5 results stay valid.
     """
 
     experiment_id: str
     metrics: tuple[MetricComparison, ...]
+    evidence: tuple[MetricEvidence, ...] = ()
     id: str = field(default_factory=new_id)
     created_at: datetime = field(default_factory=utcnow)
 
@@ -262,9 +270,13 @@ class EvaluationResult:
         _require_non_empty(self.id, "EvaluationResult.id")
         _require_aware(self.created_at, "EvaluationResult.created_at")
         object.__setattr__(self, "metrics", tuple(self.metrics))
+        object.__setattr__(self, "evidence", tuple(self.evidence))
         names = [comparison.metric for comparison in self.metrics]
         if len(names) != len(set(names)):
             raise DomainValidationError("EvaluationResult.metrics has duplicate metric names")
+        evidence_metrics = [e.metric for e in self.evidence]
+        if len(evidence_metrics) != len(set(evidence_metrics)):
+            raise DomainValidationError("EvaluationResult.evidence has duplicate metric names")
 
 
 @dataclass(frozen=True, slots=True)

@@ -379,7 +379,7 @@ def test_evidence_reports_dropped_provider_failures() -> None:
     assert lat.insufficient_evidence is True  # only 2 comparable pairs left
 
 
-# --- wiring: run_evaluation attaches evidence, result/gate unchanged ---
+# --- wiring: run_evaluation attaches evidence onto result, metrics unchanged ---
 
 
 class _Provider:
@@ -389,7 +389,7 @@ class _Provider:
         return ProviderResponse(text="ok", usage=UsageMetrics(latency_ms=5.0, cost_usd=0.001))
 
 
-def test_run_evaluation_attaches_evidence_without_touching_result_or_gate() -> None:
+def test_run_evaluation_attaches_evidence_onto_the_result() -> None:
     base = SystemVersion(
         project_id="p",
         name="c",
@@ -424,7 +424,7 @@ def test_run_evaluation_attaches_evidence_without_touching_result_or_gate() -> N
 
     ev = run_evaluation(exp, ds, base, cand, None, evaluators=evaluators, providers=providers)
 
-    # Phase 1 aggregation output is untouched
+    # Phase 1 aggregation metrics are untouched
     assert [m.metric for m in ev.result.metrics] == [
         "success_rate",
         "contains.pass_rate",
@@ -434,14 +434,14 @@ def test_run_evaluation_attaches_evidence_without_touching_result_or_gate() -> N
     ]
     assert ev.gate.gated is False  # no policy supplied
 
-    # additive statistical evidence, in aggregation order (p95 / total excluded)
-    assert [e.metric for e in ev.evidence] == [
+    # evidence rides on the result, in aggregation order (p95 / total excluded)
+    assert [e.metric for e in ev.result.evidence] == [
         "success_rate",
         "contains.pass_rate",
         "latency_ms.mean",
         "cost_usd.mean",
     ]
-    lat = next(e for e in ev.evidence if e.metric == "latency_ms.mean")
+    lat = next(e for e in ev.result.evidence if e.metric == "latency_ms.mean")
     assert lat.n_pairs == 4  # 1 case x 4 repeats
     assert lat.kind == "continuous"
     assert lat.delta == pytest.approx(0.0)  # identical provider both sides

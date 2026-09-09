@@ -256,6 +256,10 @@ def evaluation_result_to_orm(value: domain.EvaluationResult) -> orm.EvaluationRe
             )
             for position, metric in enumerate(value.metrics)
         ],
+        evidence=[
+            _metric_evidence_to_orm(evidence, position)
+            for position, evidence in enumerate(value.evidence)
+        ],
     )
 
 
@@ -272,6 +276,64 @@ def evaluation_result_from_orm(row: orm.EvaluationResult) -> domain.EvaluationRe
             )
             for metric in row.metrics
         ),
+        evidence=tuple(_metric_evidence_from_orm(evidence) for evidence in row.evidence),
+    )
+
+
+def _metric_evidence_to_orm(value: domain.MetricEvidence, position: int) -> orm.MetricEvidence:
+    return orm.MetricEvidence(
+        metric=value.metric,
+        position=position,
+        kind=value.kind,
+        n_pairs=value.n_pairs,
+        baseline_mean=value.baseline.mean,
+        baseline_median=value.baseline.median,
+        baseline_stdev=value.baseline.stdev,
+        candidate_mean=value.candidate.mean,
+        candidate_median=value.candidate.median,
+        candidate_stdev=value.candidate.stdev,
+        paired_delta_mean=value.paired_delta.mean,
+        paired_delta_median=value.paired_delta.median,
+        paired_delta_stdev=value.paired_delta.stdev,
+        delta=value.delta,
+        relative_change=value.relative_change,
+        confidence_level=value.confidence_level,
+        ci_low=value.ci_low,
+        ci_high=value.ci_high,
+        ci_excludes_zero=value.ci_excludes_zero,
+        insufficient_evidence=value.insufficient_evidence,
+        dropped_provider_failures=value.dropped_provider_failures,
+        method=value.method,
+        resamples=value.resamples,
+        seed=value.seed,
+    )
+
+
+def _metric_evidence_from_orm(row: orm.MetricEvidence) -> domain.MetricEvidence:
+    def _summary(mean: float, median: float, stdev: float) -> domain.SampleSummary:
+        return domain.SampleSummary(n=row.n_pairs, mean=mean, median=median, stdev=stdev)
+
+    kind: domain.MetricKind = "binary" if row.kind == "binary" else "continuous"
+    return domain.MetricEvidence(
+        metric=row.metric,
+        kind=kind,
+        n_pairs=row.n_pairs,
+        baseline=_summary(row.baseline_mean, row.baseline_median, row.baseline_stdev),
+        candidate=_summary(row.candidate_mean, row.candidate_median, row.candidate_stdev),
+        paired_delta=_summary(
+            row.paired_delta_mean, row.paired_delta_median, row.paired_delta_stdev
+        ),
+        delta=row.delta,
+        relative_change=row.relative_change,
+        confidence_level=row.confidence_level,
+        ci_low=row.ci_low,
+        ci_high=row.ci_high,
+        ci_excludes_zero=row.ci_excludes_zero,
+        insufficient_evidence=row.insufficient_evidence,
+        method=row.method,
+        resamples=row.resamples,
+        seed=row.seed,
+        dropped_provider_failures=row.dropped_provider_failures,
     )
 
 
