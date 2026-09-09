@@ -1,0 +1,53 @@
+project: "Customer Support QA"
+
+dataset:
+  path: "cases.jsonl"
+  name: "support"
+
+repeats: 1
+
+execution:
+  backend: live
+  timeout_seconds: 120
+
+baseline:
+  name: "support-prompt"
+  version: "v1"
+  provider: "ollama"
+  model: "llama3.2"
+  prompt_template: |-
+    Answer with a single word.
+    Q: ${input}
+    A:
+  parameters:
+    temperature: 0.0
+    seed: 42
+
+candidate:
+  name: "support-prompt"
+  version: "v2"
+  provider: "openai"
+  model: "gpt-4.1-mini"
+  prompt_template: |-
+    Answer with a single word.
+    Q: ${input}
+    A:
+  parameters:
+    temperature: 0.0
+    max_tokens: 20
+
+evaluators:
+  - type: contains
+    case_sensitive: false
+  - type: regex_match
+    name: non_empty
+    pattern: "\\S"
+
+release_policy:
+  name: "default"
+  thresholds:
+    success_rate: 0.0
+    contains.pass_rate: 0.10
+    latency_ms.p95: 0.50
+    cost_usd.total: 0.10
+  max_safety_violations: 0
