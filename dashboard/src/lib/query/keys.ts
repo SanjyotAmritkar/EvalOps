@@ -23,4 +23,7 @@ export const queryKeys = {
     runs: (id: string) => ["experiments", id, "runs"] as const,
     results: (id: string) => ["experiments", id, "results"] as const,
   },
+  jobs: {
+    detail: (id: string) => ["jobs", id] as const,
+  },
 } as const;

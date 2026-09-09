@@ -8,7 +8,6 @@ import { LoadingState } from "@/components/feedback/loading-state";
 import { BackLink } from "@/components/layout/back-link";
 import { CopyButton } from "@/components/ui/copy-button";
 import { apiErrorMessage, isNotFound } from "@/lib/api/errors";
-import type { RunResponse } from "@/lib/api/types";
 import { formatDateTime, shortId } from "@/lib/format";
 import { describeThreshold, metricLabel } from "@/lib/metric-labels";
 import { useDatasets } from "@/lib/query/datasets";
@@ -19,10 +18,10 @@ import {
 } from "@/lib/query/experiments";
 import { useReleasePolicies } from "@/lib/query/release-policies";
 import { useSystemVersions } from "@/lib/query/system-versions";
+import { JobStatus } from "./job-status";
 import { PersistedHistory } from "./persisted-history";
 import { ReleaseDecision } from "./release-decision";
 import { RunForm } from "./run-form";
-import { RunSummary } from "./run-summary";
 
 function VersionSide({
   kind,
@@ -77,7 +76,9 @@ export default function ExperimentDetailPage() {
   const runs = useExperimentRuns(experimentId);
   const results = useExperimentResults(experimentId);
 
-  const [justRan, setJustRan] = useState<RunResponse | null>(null);
+  // The id of the background run enqueued from this page, if any. Cleared to
+  // return to the run form (e.g. after a failed job).
+  const [activeJobId, setActiveJobId] = useState<string | null>(null);
 
   const backHref = `/projects/${projectId}/experiments`;
 
@@ -199,8 +200,12 @@ export default function ExperimentDetailPage() {
 
       <section className="flex flex-col gap-3">
         <h2 className="text-lg font-semibold text-fg">Run evaluation</h2>
-        {justRan ? (
-          <RunSummary result={justRan} />
+        {activeJobId ? (
+          <JobStatus
+            experimentId={experimentId}
+            jobId={activeJobId}
+            onReset={() => setActiveJobId(null)}
+          />
         ) : checkingRunState ? (
           <p className="text-sm text-fg-subtle">Checking run status…</p>
         ) : persistedResult ? (
@@ -230,7 +235,10 @@ export default function ExperimentDetailPage() {
             Run records appear under Technical details below.
           </p>
         ) : (
-          <RunForm experimentId={experimentId} onCompleted={setJustRan} />
+          <RunForm
+            experimentId={experimentId}
+            onEnqueued={(job) => setActiveJobId(job.id)}
+          />
         )}
       </section>
 

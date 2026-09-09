@@ -11,11 +11,11 @@ import {
   EVALUATOR_TYPES,
   OLLAMA_DEFAULT_BASE_URL,
   OLLAMA_DEFAULT_TIMEOUT_SECONDS,
+  type AsyncJob,
   type ExecutionBackend,
   type EvaluatorType,
-  type RunResponse,
 } from "@/lib/api/types";
-import { useRunExperiment } from "@/lib/query/experiments";
+import { useRunExperimentAsync } from "@/lib/query/experiments";
 import {
   buildRunRequest,
   defaultCaseSensitive,
@@ -35,12 +35,16 @@ const EVALUATOR_HELP: Record<EvaluatorType, string> = {
 
 export function RunForm({
   experimentId,
-  onCompleted,
+  onEnqueued,
+  disabled = false,
 }: {
   experimentId: string;
-  onCompleted: (result: RunResponse) => void;
+  /** Called with the freshly queued job once the 202 lands. */
+  onEnqueued: (job: AsyncJob) => void;
+  /** True while a job for this experiment is already active. */
+  disabled?: boolean;
 }) {
-  const run = useRunExperiment(experimentId);
+  const run = useRunExperimentAsync(experimentId);
   const [state, setState] = useState<RunConfigState>({
     backend: "mock",
     baseUrl: OLLAMA_DEFAULT_BASE_URL,
@@ -49,7 +53,8 @@ export function RunForm({
   });
 
   const errors = useMemo(() => validateRunConfig(state), [state]);
-  const canRun = isRunConfigValid(errors) && !run.isPending;
+  const busy = run.isPending || disabled;
+  const canRun = isRunConfigValid(errors) && !busy;
 
   function patchRow(index: number, patch: Partial<RunConfigState["evaluators"][number]>) {
     setState((current) => ({
@@ -80,7 +85,7 @@ export function RunForm({
     event.preventDefault();
     if (!canRun) return;
     run.mutate(buildRunRequest(state), {
-      onSuccess: (result) => onCompleted(result),
+      onSuccess: (job) => onEnqueued(job),
     });
   }
 
@@ -90,7 +95,7 @@ export function RunForm({
     <form className="flex flex-col gap-5" onSubmit={submit} noValidate>
       <fieldset
         className="flex min-w-0 flex-col gap-5 disabled:opacity-60"
-        disabled={run.isPending}
+        disabled={busy}
       >
         <div className="grid gap-4 sm:grid-cols-[200px_1fr]">
           <Select
@@ -256,24 +261,23 @@ export function RunForm({
         <div>
           <Button type="submit" disabled={!canRun}>
             <PlayIcon width={14} height={14} />
-            {run.isPending ? "Running…" : "Run evaluation"}
+            {run.isPending ? "Queuing…" : "Run evaluation"}
           </Button>
         </div>
 
         {run.isPending ? (
           <p className="text-sm text-fg-muted" role="status">
-            Executing the baseline and candidate over every case. This can take a
-            while with Ollama — keep this tab open.
+            Submitting the run to the queue…
           </p>
         ) : null}
 
         {run.isError ? (
           <p className="text-sm text-block">
-            {apiError?.status === 409
-              ? "This experiment has already been run. Its runs and results are immutable — see the history below."
-              : apiError?.status === 422
-                ? `Configuration rejected: ${apiError.message}`
-                : apiErrorMessage(run.error, "The run could not be started.")}
+            {apiError?.status === 422
+              ? `Configuration rejected: ${apiError.message}`
+              : apiError?.status === 500
+                ? "The run could not be queued — the task broker is unavailable. Try again in a moment."
+                : apiErrorMessage(run.error, "The run could not be queued.")}
           </p>
         ) : null}
       </div>

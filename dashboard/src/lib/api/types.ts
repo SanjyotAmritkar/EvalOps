@@ -226,3 +226,25 @@ export interface EvaluationResult {
   reasons: string[];
   metrics: MetricLine[];
 }
+
+// --- asynchronous execution job ---------------------------------------
+
+/**
+ * The durable lifecycle of a background experiment run. PostgreSQL is
+ * authoritative — every field mirrors the `async_job` row, never Celery/Redis.
+ * `queued` → `running` → `completed` | `failed` are the only transitions.
+ */
+export type AsyncJobStatus = "queued" | "running" | "completed" | "failed";
+
+/** Mirrors the API's AsyncJobRead (GET /jobs/{id}, POST /experiments/{id}/run-async). */
+export interface AsyncJob {
+  id: string;
+  experiment_id: string;
+  status: AsyncJobStatus;
+  created_at: string;
+  started_at: string | null;
+  completed_at: string | null;
+  evaluation_result_id: string | null;
+  error: string | null;
+  celery_task_id: string | null;
+}

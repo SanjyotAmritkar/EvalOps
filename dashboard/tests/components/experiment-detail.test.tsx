@@ -1,8 +1,10 @@
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ReactNode } from "react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import ExperimentDetailPage from "@/app/projects/[projectId]/experiments/[experimentId]/page";
+import type { AsyncJobStatus } from "@/lib/api/types";
+import { JOB_POLL_INTERVAL_MS } from "@/lib/query/experiments";
 import { jsonResponse, makeWrapper } from "../test-utils";
 
 vi.mock("next/navigation", () => ({
@@ -17,7 +19,14 @@ vi.mock("next/link", () => ({
   ),
 }));
 
+beforeEach(() => {
+  // React Query's poll interval drives the whole async flow; fake timers keep
+  // the queued -> running -> completed progression fast and deterministic.
+  vi.useFakeTimers({ shouldAdvanceTime: true });
+});
+
 afterEach(() => {
+  vi.useRealTimers();
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
 });
@@ -39,57 +48,6 @@ const V1 = {
 };
 const V2 = { ...V1, id: "v2", version: "v2" };
 const POLICY = { id: "rp1", name: "demo-policy", thresholds: {}, max_safety_violations: 0 };
-
-const PASS_RESPONSE = {
-  evaluation_result_id: "res-1",
-  experiment_id: "e1",
-  dataset: "support",
-  baseline: "support-prompt v1",
-  candidate: "support-prompt v2",
-  repeats: 2,
-  counts: { cases: 1, runs: 4, failures: 0 },
-  decision: "pass",
-  gated: true,
-  reasons: [],
-  metrics: [
-    {
-      metric: "success_rate", baseline_value: 1, candidate_value: 1,
-      delta: 0, relative_delta: 0, direction: "higher_is_better",
-      threshold: null, adverse_change: 0, regression: false,
-    },
-  ],
-};
-
-interface RunOutcome {
-  status: number;
-  body: unknown;
-}
-
-function stubApi(
-  runOutcome: RunOutcome | (() => Promise<RunOutcome>),
-  persisted: { runs?: unknown[]; results?: unknown[] } = {},
-) {
-  const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
-    const method = (init?.method ?? "GET").toUpperCase();
-    if (method === "POST" && url.endsWith("/experiments/e1/run")) {
-      const outcome =
-        typeof runOutcome === "function" ? await runOutcome() : runOutcome;
-      return jsonResponse(outcome.body, outcome.status);
-    }
-    if (url.endsWith("/api/experiments/e1")) return jsonResponse(EXPERIMENT);
-    if (url.endsWith("/api/experiments/e1/runs"))
-      return jsonResponse(persisted.runs ?? []);
-    if (url.endsWith("/api/experiments/e1/results"))
-      return jsonResponse(persisted.results ?? []);
-    if (url.endsWith("/api/projects/p1/datasets")) return jsonResponse([DATASET]);
-    if (url.endsWith("/api/projects/p1/system-versions"))
-      return jsonResponse([V1, V2]);
-    if (url.endsWith("/api/release-policies")) return jsonResponse([POLICY]);
-    throw new Error(`unhandled ${method} ${url}`);
-  });
-  vi.stubGlobal("fetch", fetchMock);
-  return fetchMock;
-}
 
 const RUN_RECORD = {
   id: "run-1",
@@ -138,30 +96,125 @@ const PERSISTED_BLOCK = {
   ],
 };
 
+/** An `async_job` row shape, keyed off the lifecycle status. */
+function makeJob(
+  status: AsyncJobStatus,
+  overrides: Record<string, unknown> = {},
+) {
+  const terminal = status === "completed" || status === "failed";
+  return {
+    id: "job-1",
+    experiment_id: "e1",
+    status,
+    created_at: "2026-09-08T13:00:00Z",
+    started_at: status === "queued" ? null : "2026-09-08T13:00:01Z",
+    completed_at: terminal ? "2026-09-08T13:00:05Z" : null,
+    evaluation_result_id: status === "completed" ? "res-persisted" : null,
+    error:
+      status === "failed"
+        ? "regex_match evaluator: bad pattern '(' — missing ), unterminated subpattern"
+        : null,
+    celery_task_id: status === "queued" ? null : "task-abc",
+    ...overrides,
+  };
+}
+
+interface StubOptions {
+  /** Response for POST /experiments/e1/run-async. Default: 202 + queued job. */
+  enqueue?: { status: number; body?: unknown };
+  /** Sequential GET /jobs/{id} statuses; the last one repeats. */
+  stages?: AsyncJobStatus[];
+  /** Block the enqueue response until this resolves (to observe the pending UI). */
+  holdEnqueue?: Promise<unknown>;
+  runs?: unknown[];
+  results?: unknown[];
+  /** Results returned once a terminal job has been polled (simulates persistence). */
+  resultsWhenDone?: unknown[];
+}
+
+function stubApi(opts: StubOptions = {}) {
+  const {
+    enqueue = { status: 202, body: makeJob("queued") },
+    stages = ["queued", "running", "completed"],
+    holdEnqueue,
+    runs = [],
+    results = [],
+    resultsWhenDone,
+  } = opts;
+
+  let jobPolls = 0;
+  let reachedTerminal = false;
+
+  const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+    const method = (init?.method ?? "GET").toUpperCase();
+
+    if (method === "POST" && url.endsWith("/experiments/e1/run-async")) {
+      if (holdEnqueue) await holdEnqueue;
+      return jsonResponse(enqueue.body ?? makeJob("queued"), enqueue.status);
+    }
+    if (method === "GET" && url.includes("/api/jobs/")) {
+      const stage =
+        stages[Math.min(jobPolls, stages.length - 1)] ?? "completed";
+      jobPolls += 1;
+      if (stage === "completed" || stage === "failed") reachedTerminal = true;
+      return jsonResponse(makeJob(stage), 200);
+    }
+    if (url.endsWith("/api/experiments/e1")) return jsonResponse(EXPERIMENT);
+    if (url.endsWith("/api/experiments/e1/runs")) return jsonResponse(runs);
+    if (url.endsWith("/api/experiments/e1/results")) {
+      return jsonResponse(
+        reachedTerminal && resultsWhenDone ? resultsWhenDone : results,
+      );
+    }
+    if (url.endsWith("/api/projects/p1/datasets")) return jsonResponse([DATASET]);
+    if (url.endsWith("/api/projects/p1/system-versions"))
+      return jsonResponse([V1, V2]);
+    if (url.endsWith("/api/release-policies")) return jsonResponse([POLICY]);
+    throw new Error(`unhandled ${method} ${url}`);
+  });
+  vi.stubGlobal("fetch", fetchMock);
+
+  const countCalls = (predicate: (url: string, init?: RequestInit) => boolean) =>
+    fetchMock.mock.calls.filter(([u, i]) =>
+      predicate(String(u), i as RequestInit | undefined),
+    ).length;
+
+  return {
+    fetchMock,
+    jobPollCount: () =>
+      countCalls(
+        (u, i) =>
+          (i?.method ?? "GET").toUpperCase() === "GET" && u.includes("/api/jobs/"),
+      ),
+    enqueueCount: () =>
+      countCalls(
+        (u, i) =>
+          (i?.method ?? "GET").toUpperCase() === "POST" &&
+          u.endsWith("/experiments/e1/run-async"),
+      ),
+  };
+}
+
 describe("ExperimentDetailPage", () => {
   it("resolves the configuration to readable labels", async () => {
-    stubApi({ status: 201, body: PASS_RESPONSE });
+    stubApi();
     render(<ExperimentDetailPage />, { wrapper: makeWrapper() });
 
     expect(await screen.findByText("support v1")).toBeInTheDocument();
     expect(screen.getAllByText(/support-prompt v/).length).toBeGreaterThan(0);
     expect(screen.getAllByText("demo-policy").length).toBeGreaterThan(0);
-    // implementation details are not the first thing shown
-    expect(screen.queryByText(/None — comparison only/)).not.toBeInTheDocument();
     expect(screen.getByText(/Baseline · current system/i)).toBeInTheDocument();
     expect(screen.getByText(/Candidate · proposed change/i)).toBeInTheDocument();
   });
 
-  it("runs the experiment, disabling the button while pending, then shows PASS", async () => {
-    let release: (o: RunOutcome) => void = () => {};
-    stubApi(
-      () =>
-        new Promise<RunOutcome>((resolve) => {
-          release = resolve;
-        }),
-    );
+  it("queues a background run and locks out a second submit while it is active", async () => {
+    let release: () => void = () => {};
+    const hold = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const { fetchMock, enqueueCount } = stubApi({ holdEnqueue: hold });
 
-    const user = userEvent.setup();
+    const user = userEvent.setup({ delay: null });
     render(<ExperimentDetailPage />, { wrapper: makeWrapper() });
 
     const runButton = await screen.findByRole("button", {
@@ -169,64 +222,129 @@ describe("ExperimentDetailPage", () => {
     });
     await user.click(runButton);
 
+    // enqueue POST in flight: the button is relabelled and disabled
     await waitFor(() =>
-      expect(
-        screen.getByRole("button", { name: /running/i }),
-      ).toBeDisabled(),
+      expect(screen.getByRole("button", { name: /queuing/i })).toBeDisabled(),
     );
 
-    release({ status: 201, body: PASS_RESPONSE });
+    release();
 
-    expect(await screen.findByText("PASS")).toBeInTheDocument();
-    expect(screen.getByText("res-1")).toBeInTheDocument();
-    expect(screen.getByText(/1 case · 4 runs/)).toBeInTheDocument();
+    // 202 lands -> the form is replaced by the lifecycle panel; no Run button
+    expect(await screen.findByText(/^Queued$/)).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: /run evaluation/i }),
+    ).not.toBeInTheDocument();
+
+    // the async endpoint is hit once; the sync /run endpoint is never used
+    expect(enqueueCount()).toBe(1);
+    expect(
+      fetchMock.mock.calls.some(([u, i]) => {
+        const url = String(u);
+        return (
+          ((i as RequestInit | undefined)?.method ?? "GET").toUpperCase() ===
+            "POST" && url.endsWith("/experiments/e1/run") // exact sync path
+        );
+      }),
+    ).toBe(false);
   });
 
-  it("treats HTTP 201 + BLOCK as a completed run, not an error", async () => {
+  it("polls queued -> running -> completed, then shows the persisted PASS decision", async () => {
+    const { jobPollCount } = stubApi({
+      stages: ["queued", "running", "completed"],
+      resultsWhenDone: [PERSISTED_PASS],
+    });
+
+    const user = userEvent.setup({ delay: null });
+    render(<ExperimentDetailPage />, { wrapper: makeWrapper() });
+
+    await user.click(
+      await screen.findByRole("button", { name: /run evaluation/i }),
+    );
+
+    expect(await screen.findByText(/^Queued$/)).toBeInTheDocument();
+    expect(jobPollCount()).toBe(1);
+
+    await vi.advanceTimersByTimeAsync(JOB_POLL_INTERVAL_MS);
+    expect(await screen.findByText(/^Running$/)).toBeInTheDocument();
+
+    await vi.advanceTimersByTimeAsync(JOB_POLL_INTERVAL_MS);
+    expect(await screen.findByText(/^Completed$/)).toBeInTheDocument();
+
+    // the persisted decision was refreshed through the existing results API
+    expect(await screen.findByText("PASS")).toBeInTheDocument();
+    expect(screen.getByText("Answer quality")).toBeInTheDocument();
+
+    // polling has stopped now that the job is terminal
+    const atTerminal = jobPollCount();
+    await vi.advanceTimersByTimeAsync(JOB_POLL_INTERVAL_MS * 5);
+    expect(jobPollCount()).toBe(atTerminal);
+  });
+
+  it("renders a completed BLOCK as a release decision, not a run failure", async () => {
     stubApi({
-      status: 201,
-      body: {
-        ...PASS_RESPONSE,
-        decision: "block",
-        reasons: ["latency_ms.p95 regressed by 40% (tolerance 20%)"],
-        metrics: [
-          {
-            metric: "latency_ms.p95", baseline_value: 100, candidate_value: 140,
-            delta: 40, relative_delta: 0.4, direction: "lower_is_better",
-            threshold: 0.2, adverse_change: 0.4, regression: true,
-          },
-        ],
+      stages: ["queued", "completed"],
+      resultsWhenDone: [PERSISTED_BLOCK],
+    });
+
+    const user = userEvent.setup({ delay: null });
+    render(<ExperimentDetailPage />, { wrapper: makeWrapper() });
+
+    await user.click(
+      await screen.findByRole("button", { name: /run evaluation/i }),
+    );
+    await screen.findByText(/^Queued$/);
+    await vi.advanceTimersByTimeAsync(JOB_POLL_INTERVAL_MS);
+
+    expect(await screen.findByText("BLOCK")).toBeInTheDocument();
+    expect(
+      screen.getByText("Answer quality regressed 50%; policy allows up to 10%."),
+    ).toBeInTheDocument();
+    // it is a completed run, not a worker failure
+    expect(screen.getByText(/^Completed$/)).toBeInTheDocument();
+    expect(screen.queryByText(/failed on the worker/i)).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: /try running again/i }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("shows a failed job with its persisted error and offers a retry", async () => {
+    stubApi({ stages: ["queued", "running", "failed"] });
+
+    const user = userEvent.setup({ delay: null });
+    render(<ExperimentDetailPage />, { wrapper: makeWrapper() });
+
+    await user.click(
+      await screen.findByRole("button", { name: /run evaluation/i }),
+    );
+    await screen.findByText(/^Queued$/);
+    await vi.advanceTimersByTimeAsync(JOB_POLL_INTERVAL_MS);
+    await vi.advanceTimersByTimeAsync(JOB_POLL_INTERVAL_MS);
+
+    expect(await screen.findByText(/^Failed$/)).toBeInTheDocument();
+    // the persisted job error is surfaced verbatim
+    expect(screen.getByText(/unterminated subpattern/i)).toBeInTheDocument();
+    expect(screen.queryByText("PASS")).not.toBeInTheDocument();
+    expect(screen.queryByText("BLOCK")).not.toBeInTheDocument();
+
+    // retry clears the job and returns to the run form
+    await user.click(screen.getByRole("button", { name: /try running again/i }));
+    expect(
+      await screen.findByRole("button", { name: /run evaluation/i }),
+    ).toBeInTheDocument();
+  });
+
+  it("surfaces an enqueue (broker) failure on the form, not as a worker failure", async () => {
+    const { jobPollCount } = stubApi({
+      enqueue: {
+        status: 500,
+        body: {
+          detail:
+            "the run for experiment 'e1' could not be dispatched to the task broker; job 'abc' was marked failed",
+        },
       },
     });
 
-    const user = userEvent.setup();
-    render(<ExperimentDetailPage />, { wrapper: makeWrapper() });
-
-    await user.click(
-      await screen.findByRole("button", { name: /run evaluation/i }),
-    );
-
-    expect(await screen.findByText("BLOCK")).toBeInTheDocument();
-    expect(screen.getByText(/regressed beyond policy/i)).toBeInTheDocument();
-    // friendly, human-formatted blocking reason built from backend numbers
-    expect(
-      screen.getByText("P95 latency regressed 40%; policy allows up to 20%."),
-    ).toBeInTheDocument();
-    // the backend's verbatim reason string is still available (progressive disclosure)
-    expect(
-      screen.getByText("latency_ms.p95 regressed by 40% (tolerance 20%)"),
-    ).toBeInTheDocument();
-    expect(screen.queryByText(/could not be started/i)).not.toBeInTheDocument();
-    expect(screen.queryByText(/Configuration rejected/i)).not.toBeInTheDocument();
-  });
-
-  it("surfaces a 409 duplicate-run response clearly", async () => {
-    stubApi({
-      status: 409,
-      body: { detail: "experiment 'e1' has already been run; its results are immutable" },
-    });
-
-    const user = userEvent.setup();
+    const user = userEvent.setup({ delay: null });
     render(<ExperimentDetailPage />, { wrapper: makeWrapper() });
 
     await user.click(
@@ -234,21 +352,26 @@ describe("ExperimentDetailPage", () => {
     );
 
     expect(
-      await screen.findByText(/already been run/i),
+      await screen.findByText(/task broker is unavailable/i),
     ).toBeInTheDocument();
+    // nothing was queued, so nothing is polled; the form stays available to retry
+    expect(jobPollCount()).toBe(0);
+    expect(
+      screen.getByRole("button", { name: /run evaluation/i }),
+    ).toBeEnabled();
   });
 
-  it("surfaces a 422 configuration error clearly", async () => {
+  it("surfaces a 422 configuration error from the async endpoint", async () => {
     stubApi({
-      status: 422,
-      body: { detail: "evaluators[0]: missing required field 'pattern'" },
+      enqueue: {
+        status: 422,
+        body: { detail: "evaluators[0]: missing required field 'pattern'" },
+      },
     });
 
-    const user = userEvent.setup();
+    const user = userEvent.setup({ delay: null });
     render(<ExperimentDetailPage />, { wrapper: makeWrapper() });
 
-    // switch the single evaluator row to regex_match but leave the pattern set,
-    // so the client lets it through and the server rejects it
     await user.selectOptions(
       await screen.findByLabelText("Type"),
       "regex_match",
@@ -261,13 +384,10 @@ describe("ExperimentDetailPage", () => {
     ).toBeInTheDocument();
   });
 
-  // --- persisted decision (survives refresh; no in-memory run) --------------
+  // --- persisted decision (survives refresh; no in-memory job) --------------
 
   it("shows the persisted PASS decision without a fresh run", async () => {
-    stubApi({ status: 201, body: PASS_RESPONSE }, {
-      runs: [RUN_RECORD],
-      results: [PERSISTED_PASS],
-    });
+    stubApi({ runs: [RUN_RECORD], results: [PERSISTED_PASS] });
 
     render(<ExperimentDetailPage />, { wrapper: makeWrapper() });
 
@@ -275,18 +395,18 @@ describe("ExperimentDetailPage", () => {
     expect(
       screen.getByText(/All gated metrics stayed within the release policy/i),
     ).toBeInTheDocument();
-    expect(screen.getByText(/decision recomputed from stored results/i)).toBeInTheDocument();
-    // friendly metric name from metric-labels.ts, raw key kept as detail
+    expect(
+      screen.getByText(/decision recomputed from stored results/i),
+    ).toBeInTheDocument();
     expect(screen.getByText("Answer quality")).toBeInTheDocument();
     expect(screen.getByText("contains.pass_rate")).toBeInTheDocument();
-    // no run form when a result already exists
     expect(
       screen.queryByRole("button", { name: /run evaluation/i }),
     ).not.toBeInTheDocument();
   });
 
   it("shows the persisted BLOCK decision with a plain-English reason", async () => {
-    stubApi({ status: 201, body: PASS_RESPONSE }, {
+    stubApi({
       runs: [RUN_RECORD, { ...RUN_RECORD, id: "run-2", system_version_id: "v2" }],
       results: [PERSISTED_BLOCK],
     });
@@ -297,6 +417,6 @@ describe("ExperimentDetailPage", () => {
     expect(
       screen.getByText("Answer quality regressed 50%; policy allows up to 10%."),
     ).toBeInTheDocument();
-    expect(screen.getByText("Blocked")).toBeInTheDocument(); // per-metric status
+    expect(screen.getByText("Blocked")).toBeInTheDocument();
   });
 });
