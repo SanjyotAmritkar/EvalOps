@@ -28,26 +28,46 @@ from evalops.execution_service import execute_experiment_in_uow
 from evalops.worker.celery_app import celery_app, get_session_factory
 
 
+class DispatchError(domain.EvalOpsError):
+    """The ``async_job`` row was committed but the Celery broker could not be
+    reached to enqueue the task. The job is marked ``failed`` before this is
+    raised, so the persisted state stays truthful."""
+
+
 def enqueue_experiment_run(
     experiment_id: str,
     execution: dict[str, Any],
     evaluators: list[dict[str, Any]],
     *,
     sessions: sessionmaker[Session] | None = None,
-) -> str:
+) -> domain.AsyncJob:
     """Create a queued :class:`~evalops.domain.AsyncJob` and dispatch the task.
 
-    Returns the job id. The job row is committed before the task is dispatched
-    so the worker can always find it. Raises
-    :class:`~evalops.db.RecordConflict` if ``experiment_id`` does not exist
-    (foreign key).
+    Returns the persisted ``queued`` job. The job row is committed (its own unit
+    of work) before the task is dispatched, so the worker can always find it.
+
+    * :class:`~evalops.db.RecordConflict` if ``experiment_id`` does not exist
+      (foreign key).
+    * :class:`DispatchError` if the broker is unreachable -- the job is marked
+      ``failed`` first, so ``GET /jobs/{id}`` reflects reality.
     """
     factory = sessions or get_session_factory()
     job = domain.AsyncJob(experiment_id=experiment_id)
     with unit_of_work(factory) as session:
         AsyncJobRepository(session).add(job)
-    execute_experiment_task.delay(job.id, execution, evaluators)
-    return job.id
+
+    try:
+        execute_experiment_task.delay(job.id, execution, evaluators)
+    except Exception as exc:  # broker unreachable, serialization error, ...
+        with unit_of_work(factory) as session:
+            AsyncJobRepository(session).mark_failed(
+                job.id, f"dispatch to the task broker failed: {type(exc).__name__}: {exc}"
+            )
+        raise DispatchError(
+            f"async job {job.id!r} was recorded but could not be dispatched: {exc}"
+        ) from exc
+
+    return job
 
 
 @celery_app.task(bind=True, name="evalops.execute_experiment")

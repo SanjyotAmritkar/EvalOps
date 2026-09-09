@@ -68,9 +68,10 @@ def test_enqueue_runs_job_to_completion_and_links_result(
     runnable_experiment: str,
     sessions: sessionmaker[Session],
 ) -> None:
-    job_id = enqueue_experiment_run(runnable_experiment, _MOCK, _EVALUATORS)
+    queued = enqueue_experiment_run(runnable_experiment, _MOCK, _EVALUATORS)
+    assert queued.status is JobStatus.QUEUED
 
-    job = _load(sessions, job_id)
+    job = _load(sessions, queued.id)
     assert job.status is JobStatus.COMPLETED
     assert job.error is None
     assert job.evaluation_result_id is not None

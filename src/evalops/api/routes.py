@@ -13,8 +13,9 @@ from typing import TypeVar
 from fastapi import APIRouter, HTTPException, status
 
 from evalops import domain
-from evalops.api.deps import SessionDep
+from evalops.api.deps import SessionDep, SessionsDep
 from evalops.api.schemas import (
+    AsyncJobRead,
     DatasetCreate,
     DatasetRead,
     EvaluationResultRead,
@@ -31,6 +32,7 @@ from evalops.api.schemas import (
     SystemVersionRead,
 )
 from evalops.db import (
+    AsyncJobRepository,
     DatasetRepository,
     EvaluationResultRepository,
     EvaluationRunRepository,
@@ -41,6 +43,7 @@ from evalops.db import (
 )
 from evalops.execution_service import execute_experiment
 from evalops.gate import evaluate_gate
+from evalops.worker.tasks import DispatchError, enqueue_experiment_run
 
 _T = TypeVar("_T")
 
@@ -56,6 +59,7 @@ datasets = APIRouter(tags=["datasets"])
 system_versions = APIRouter(tags=["system-versions"])
 release_policies = APIRouter(tags=["release-policies"])
 experiments = APIRouter(tags=["experiments"])
+jobs = APIRouter(tags=["jobs"])
 
 
 # --- projects ---------------------------------------------------------
@@ -238,6 +242,39 @@ def run_experiment_route(experiment_id: str, body: RunRequest, session: SessionD
     )
 
 
+@experiments.post("/experiments/{experiment_id}/run-async", status_code=status.HTTP_202_ACCEPTED)
+def run_experiment_async_route(
+    experiment_id: str,
+    body: RunRequest,
+    session: SessionDep,
+    sessions: SessionsDep,
+) -> AsyncJobRead:
+    """Queue a background run: validate the request, create a queued AsyncJob,
+    dispatch the Celery task, and return 202 with the job.
+
+    Structural request validation is synchronous (422); semantic/runtime
+    problems (e.g. a bad evaluator config) surface later as a ``failed`` job.
+    """
+    _found(ExperimentRepository(session).get(experiment_id), "experiment not found")
+    try:
+        job = enqueue_experiment_run(
+            experiment_id,
+            body.execution.model_dump(),
+            [spec.model_dump(exclude_none=True) for spec in body.evaluators],
+            sessions=sessions,
+        )
+    except DispatchError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc)
+        ) from exc
+    return AsyncJobRead.of(job)
+
+
+@jobs.get("/jobs/{job_id}")
+def get_job(job_id: str, session: SessionDep) -> AsyncJobRead:
+    return AsyncJobRead.of(_found(AsyncJobRepository(session).get(job_id), "job not found"))
+
+
 @experiments.get("/experiments/{experiment_id}/runs")
 def list_experiment_runs(experiment_id: str, session: SessionDep) -> list[EvaluationRunRead]:
     _found(ExperimentRepository(session).get(experiment_id), "experiment not found")
@@ -267,4 +304,4 @@ def list_experiment_results(experiment_id: str, session: SessionDep) -> list[Eva
     ]
 
 
-ROUTERS = (projects, datasets, system_versions, release_policies, experiments)
+ROUTERS = (projects, datasets, system_versions, release_policies, experiments, jobs)

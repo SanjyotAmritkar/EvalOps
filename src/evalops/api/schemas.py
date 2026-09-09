@@ -13,7 +13,7 @@ from typing import Annotated, Any, Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 from evalops import domain
-from evalops.domain.enums import CaseOrigin, EvaluatorFamily, ProviderName
+from evalops.domain.enums import CaseOrigin, EvaluatorFamily, JobStatus, ProviderName
 from evalops.execution import ExecutionSpec
 from evalops.gate import GateReport
 from evalops.ollama import DEFAULT_BASE_URL, DEFAULT_TIMEOUT_SECONDS
@@ -397,4 +397,37 @@ class EvaluationResultRead(BaseModel):
                 )
                 for mc in value.metrics
             ],
+        )
+
+
+# --- async job -----------------------------------------------------
+
+
+class AsyncJobRead(BaseModel):
+    """The durable status of a background experiment run. PostgreSQL is
+    authoritative -- these fields come from the ``async_job`` row, never from
+    Celery/Redis."""
+
+    id: str
+    experiment_id: str
+    status: JobStatus
+    created_at: datetime
+    started_at: datetime | None
+    completed_at: datetime | None
+    evaluation_result_id: str | None
+    error: str | None
+    celery_task_id: str | None
+
+    @classmethod
+    def of(cls, value: domain.AsyncJob) -> AsyncJobRead:
+        return cls(
+            id=value.id,
+            experiment_id=value.experiment_id,
+            status=value.status,
+            created_at=value.created_at,
+            started_at=value.started_at,
+            completed_at=value.completed_at,
+            evaluation_result_id=value.evaluation_result_id,
+            error=value.error,
+            celery_task_id=value.celery_task_id,
         )

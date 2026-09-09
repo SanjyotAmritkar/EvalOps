@@ -328,8 +328,19 @@ distributed locking. A hard worker crash between `running` and a terminal
 state is out of scope here (Phase 4 recovery/reaping is later).
 
 Redis is broker-only; runs and results are written to PostgreSQL through the
-execution service. The synchronous `POST /experiments/{id}/run` is unchanged;
-there is no async API endpoint yet.
+execution service.
+
+**Async API.** `POST /experiments/{id}/run-async` validates the same
+`RunRequest` the sync route uses, calls `enqueue_experiment_run` (which commits
+a `queued` job in its own unit of work, then dispatches the Celery task), and
+returns **202** with the job (`AsyncJobRead`). `GET /jobs/{job_id}` returns the
+job's current row. Status always comes from PostgreSQL, never from a Celery
+result backend (there is none). If the job row commits but broker dispatch
+fails, `enqueue_experiment_run` marks the job `failed` and raises
+`DispatchError`; the route returns **500** and `GET /jobs/{id}` shows the
+`failed` job -- dispatch failure never returns 202. Structural request errors
+are synchronous 422s; a bad evaluator config surfaces later as a `failed` job.
+The synchronous `POST /experiments/{id}/run` is unchanged.
 
 Python code is packaged under an installable `src/evalops/` package (src layout). The frozen Phase 0 domain model lives at `src/evalops/domain/`. The entries above are `evalops` submodules — `evalops.gateway`, `evalops.eval`, `evalops.api`, `evalops.worker`, `evalops.ci` — not top-level directories; non-Python trees (`datasets/`, `dashboard/`, `infra/`, `docs/`) stay at the repository root. Each is created only when its phase begins.
 
