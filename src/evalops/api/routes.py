@@ -30,7 +30,6 @@ from evalops.api.schemas import (
     SystemVersionCreate,
     SystemVersionRead,
 )
-from evalops.api.service import execute_experiment
 from evalops.db import (
     DatasetRepository,
     EvaluationResultRepository,
@@ -40,6 +39,7 @@ from evalops.db import (
     ReleasePolicyRepository,
     SystemVersionRepository,
 )
+from evalops.execution_service import execute_experiment
 from evalops.gate import evaluate_gate
 
 _T = TypeVar("_T")
@@ -227,10 +227,12 @@ def get_experiment(experiment_id: str, session: SessionDep) -> ExperimentRead:
 
 @experiments.post("/experiments/{experiment_id}/run", status_code=status.HTTP_201_CREATED)
 def run_experiment_route(experiment_id: str, body: RunRequest, session: SessionDep) -> RunResponse:
-    experiment = _found(ExperimentRepository(session).get(experiment_id), "experiment not found")
+    # Orchestration (load, run, persist, gate) lives in the execution service;
+    # the route only adapts the HTTP request. The request-scoped session's unit
+    # of work owns the transaction.
     return execute_experiment(
         session,
-        experiment,
+        experiment_id,
         body.execution.to_spec(),
         [spec.model_dump(exclude_none=True) for spec in body.evaluators],
     )

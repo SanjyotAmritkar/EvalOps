@@ -14,4 +14,12 @@ class RecordConflict(PersistenceError):
     """
 
 
-__all__ = ["PersistenceError", "RecordConflict"]
+class RecordNotFound(PersistenceError):
+    """A record addressed by id does not exist.
+
+    The lookup analogue of :class:`RecordConflict`: raised by services that load
+    an entity by id and cannot proceed without it.
+    """
+
+
+__all__ = ["PersistenceError", "RecordConflict", "RecordNotFound"]

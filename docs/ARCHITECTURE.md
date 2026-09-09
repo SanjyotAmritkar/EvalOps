@@ -278,16 +278,27 @@ Stretch (once Phase 8 exists):
 ## 12. Repository Structure
 
 ```
-/gateway        provider clients (OpenAI, Anthropic, Ollama), cost/latency tracking
-/eval           evaluators (deterministic, statistical, judge), rubrics, calibration
-/datasets       versioned task sets (general/ + clinical/)
-/api            FastAPI routes, auth, experiment orchestration
-/worker         Celery tasks (Phase 4+)
-/dashboard      Next.js app
-/ci             evalops gate command + GitHub Actions workflow
-/infra          docker-compose, Dockerfiles
-/docs           this file and any supporting design docs
+/gateway            provider clients (OpenAI, Anthropic, Ollama), cost/latency tracking
+/eval               evaluators (deterministic, statistical, judge), rubrics, calibration
+/datasets           versioned task sets (general/ + clinical/)
+/api                FastAPI routes + request/response schemas (adapts HTTP to the service)
+/execution_service  persisted experiment execution: load → run → persist → gate, HTTP-independent
+/worker             Celery tasks (Phase 4+)
+/dashboard          Next.js app
+/ci                 evalops gate command + GitHub Actions workflow
+/infra              docker-compose, Dockerfiles
+/docs               this file and any supporting design docs
 ```
+
+Experiment orchestration lives in `evalops.execution_service`, not in the API
+routes. It takes an experiment id plus the non-persisted run configuration and
+owns loading entities, running the pipeline, persisting runs/results, and
+applying the release gate. It has two entry points that differ only in
+transaction ownership: `execute_experiment(session, ...)` where the caller's
+unit of work owns commit/rollback (the FastAPI request path), and
+`execute_experiment_in_uow(sessions, ...)` which opens its own unit of work for
+callers with no request-scoped session (the Phase 4 worker). The service never
+commits a caller-supplied session.
 
 Python code is packaged under an installable `src/evalops/` package (src layout). The frozen Phase 0 domain model lives at `src/evalops/domain/`. The entries above are `evalops` submodules — `evalops.gateway`, `evalops.eval`, `evalops.api`, `evalops.worker`, `evalops.ci` — not top-level directories; non-Python trees (`datasets/`, `dashboard/`, `infra/`, `docs/`) stay at the repository root. Each is created only when its phase begins.
 

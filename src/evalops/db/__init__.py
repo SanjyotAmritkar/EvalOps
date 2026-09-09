@@ -7,7 +7,7 @@ workers, no changes to the evaluation engine.
 
 from evalops.db.base import Base
 from evalops.db.engine import DEFAULT_DATABASE_URL, create_db_engine, database_url
-from evalops.db.errors import PersistenceError, RecordConflict
+from evalops.db.errors import PersistenceError, RecordConflict, RecordNotFound
 from evalops.db.models import (
     CaseResult,
     Dataset,
@@ -51,6 +51,7 @@ __all__ = [
     "Project",
     "ProjectRepository",
     "RecordConflict",
+    "RecordNotFound",
     "ReleasePolicy",
     "ReleasePolicyRepository",
     "SystemVersion",
