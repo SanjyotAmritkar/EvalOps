@@ -19,6 +19,8 @@ from evalops.domain.errors import DomainValidationError
 from evalops.domain.ids import new_id
 from evalops.domain.value_objects import (
     EvaluatorScore,
+    JudgeCalibrationCase,
+    JudgeCalibrationMetrics,
     MetricComparison,
     MetricEvidence,
     UsageMetrics,
@@ -381,3 +383,48 @@ class AsyncJob:
                 )
             if self.evaluation_result_id is not None:
                 raise DomainValidationError("a failed AsyncJob has no evaluation_result_id")
+
+
+@dataclass(frozen=True, slots=True)
+class JudgeCalibration:
+    """Persisted result of calibrating one configured LLM judge against a
+    human-labeled set (Phase 6, CP 6.2).
+
+    Pure measurement of judge trustworthiness. It records the judge's identity
+    (provider / model / name / temperature / rubric) and config metadata --
+    never credentials -- plus the aggregate metrics and every scored case. It
+    is deliberately unconnected to Experiment / ReleasePolicy: calibration does
+    not change release gating.
+    """
+
+    judge_provider: ProviderName
+    judge_model: str
+    judge_name: str
+    judge_temperature: float
+    rubric_id: str
+    metrics: JudgeCalibrationMetrics
+    cases: tuple[JudgeCalibrationCase, ...]
+    id: str = field(default_factory=new_id)
+    created_at: datetime = field(default_factory=utcnow)
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.judge_provider, ProviderName):
+            raise DomainValidationError(
+                "JudgeCalibration.judge_provider must be a ProviderName member"
+            )
+        for value, label in (
+            (self.judge_model, "JudgeCalibration.judge_model"),
+            (self.judge_name, "JudgeCalibration.judge_name"),
+            (self.rubric_id, "JudgeCalibration.rubric_id"),
+            (self.id, "JudgeCalibration.id"),
+        ):
+            if not value.strip():
+                raise DomainValidationError(f"{label} must be a non-empty string")
+        if self.judge_temperature < 0:
+            raise DomainValidationError("JudgeCalibration.judge_temperature must be >= 0")
+        _require_aware(self.created_at, "JudgeCalibration.created_at")
+        object.__setattr__(self, "cases", tuple(self.cases))
+        if self.metrics.total != len(self.cases):
+            raise DomainValidationError(
+                "JudgeCalibration.metrics.total must equal the number of cases"
+            )

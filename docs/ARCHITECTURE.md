@@ -372,6 +372,40 @@ calibration/
 └── calibration_report.json
 ```
 
+### 9.1 Implemented: binary agreement calibration (CP 6.2)
+
+`evalops.calibration.calibrate_judge(judge, examples)` runs a configured
+`LLMJudge` (CP 6.1) over a list of `LabeledJudgeExample`
+(`input`, `output`, optional `reference`, human `human_pass`) and returns a
+`JudgeCalibration`:
+
+* **flow** — for each example the judge is run once via `LLMJudge.judge(...)`.
+  A `ProviderError` or `JudgeError` on an example is recorded on that
+  `JudgeCalibrationCase` (`judge_pass = None`, `error` set) and **excluded from
+  every metric** — never counted as agreement. Any other exception propagates.
+* **metrics** (`JudgeCalibrationMetrics`, positive class = "pass"):
+  `total`; `scored` = examples the judge returned a verdict for; `failures`;
+  `agreements` = TP + TN and `agreement_rate` = agreements / scored; the
+  confusion matrix `TP` (human & judge pass) / `TN` (both fail) / `FP` (judge
+  pass, human fail) / `FN` (judge fail, human pass); `precision` = TP/(TP+FP),
+  `recall` = TP/(TP+FN), `f1` = harmonic mean. Every ratio is `None` (not `0`)
+  when its denominator is zero.
+* **inspection** — every `JudgeCalibrationCase` keeps the human verdict and the
+  judge's verdict, score, and reasoning.
+
+**Persistence / API.** `judge_calibration` (+ `judge_calibration_case` child)
+store the judge's identity and config metadata — provider, model, name,
+temperature, `rubric_id` — the aggregate metrics, and every scored case.
+**Never a credential.** Standalone: no experiment/project foreign key.
+`POST /judge-calibrations` runs and persists one; `GET
+/judge-calibrations/{id}` retrieves it.
+
+**Semantics.** Calibration is pure measurement of judge trustworthiness. It is
+deliberately unconnected to the Phase 5 release gate: a low agreement rate does
+**not** reject or disable a judge, and gate behaviour is unchanged. V1 is
+binary pass/fail only — Cohen's κ, ordinal scores, significance, and
+auto-gating are out of scope.
+
 ---
 
 ## 10. Phased Build Plan

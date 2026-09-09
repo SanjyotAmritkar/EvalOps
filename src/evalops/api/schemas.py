@@ -509,3 +509,103 @@ class AsyncJobRead(BaseModel):
             error=value.error,
             celery_task_id=value.celery_task_id,
         )
+
+
+# --- LLM-judge calibration (Phase 6, CP 6.2) ------------------------
+
+
+class LabeledJudgeExampleIn(_Create):
+    input: str
+    output: str
+    human_pass: bool
+    reference: str | None = None
+
+
+class JudgeCalibrationCreate(_Create):
+    """Configure and run a calibration. No API key -- credentials are read from
+    the environment only."""
+
+    provider: str
+    model: str
+    name: str | None = None
+    temperature: float | None = None
+    base_url: str | None = None
+    examples: Annotated[list[LabeledJudgeExampleIn], Field(min_length=1)]
+
+
+class JudgeCalibrationMetricsRead(BaseModel):
+    total: int
+    scored: int
+    failures: int
+    agreements: int
+    agreement_rate: float | None
+    true_positives: int
+    true_negatives: int
+    false_positives: int
+    false_negatives: int
+    precision: float | None
+    recall: float | None
+    f1: float | None
+
+
+class JudgeCalibrationCaseRead(BaseModel):
+    input: str
+    output: str
+    reference: str | None
+    human_pass: bool
+    judge_pass: bool | None
+    judge_score: float | None
+    judge_reasoning: str | None
+    error: str | None
+
+
+class JudgeCalibrationRead(BaseModel):
+    id: str
+    created_at: datetime
+    judge_provider: ProviderName
+    judge_model: str
+    judge_name: str
+    judge_temperature: float
+    rubric_id: str
+    metrics: JudgeCalibrationMetricsRead
+    cases: list[JudgeCalibrationCaseRead]
+
+    @classmethod
+    def of(cls, value: domain.JudgeCalibration) -> JudgeCalibrationRead:
+        m = value.metrics
+        return cls(
+            id=value.id,
+            created_at=value.created_at,
+            judge_provider=value.judge_provider,
+            judge_model=value.judge_model,
+            judge_name=value.judge_name,
+            judge_temperature=value.judge_temperature,
+            rubric_id=value.rubric_id,
+            metrics=JudgeCalibrationMetricsRead(
+                total=m.total,
+                scored=m.scored,
+                failures=m.failures,
+                agreements=m.agreements,
+                agreement_rate=m.agreement_rate,
+                true_positives=m.true_positives,
+                true_negatives=m.true_negatives,
+                false_positives=m.false_positives,
+                false_negatives=m.false_negatives,
+                precision=m.precision,
+                recall=m.recall,
+                f1=m.f1,
+            ),
+            cases=[
+                JudgeCalibrationCaseRead(
+                    input=case.input,
+                    output=case.output,
+                    reference=case.reference,
+                    human_pass=case.human_pass,
+                    judge_pass=case.judge_pass,
+                    judge_score=case.judge_score,
+                    judge_reasoning=case.judge_reasoning,
+                    error=case.error,
+                )
+                for case in value.cases
+            ],
+        )

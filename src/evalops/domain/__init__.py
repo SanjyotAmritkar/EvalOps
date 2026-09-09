@@ -18,6 +18,7 @@ from evalops.domain.entities import (
     EvaluationResult,
     EvaluationRun,
     Experiment,
+    JudgeCalibration,
     Project,
     ReleasePolicy,
     SystemVersion,
@@ -33,6 +34,9 @@ from evalops.domain.errors import DomainValidationError, EvalOpsError
 from evalops.domain.ids import EntityId, new_id
 from evalops.domain.value_objects import (
     EvaluatorScore,
+    JudgeCalibrationCase,
+    JudgeCalibrationMetrics,
+    LabeledJudgeExample,
     MetricComparison,
     MetricEvidence,
     MetricKind,
@@ -56,6 +60,10 @@ __all__ = [
     "EvaluatorScore",
     "Experiment",
     "JobStatus",
+    "JudgeCalibration",
+    "JudgeCalibrationCase",
+    "JudgeCalibrationMetrics",
+    "LabeledJudgeExample",
     "MetricComparison",
     "MetricEvidence",
     "MetricKind",

@@ -22,6 +22,7 @@ from evalops.db import (
     EvaluationResultRepository,
     EvaluationRunRepository,
     ExperimentRepository,
+    JudgeCalibrationRepository,
     ProjectRepository,
     RecordConflict,
     RecordNotFound,
@@ -219,6 +220,71 @@ def test_release_policy_round_trip(sessions: Sessions) -> None:
 
     assert loaded == policy
     assert loaded is not None and dict(loaded.thresholds) == dict(policy.thresholds)
+
+
+def _calibration_case(
+    *, human: bool, judge: bool | None, error: str | None = None
+) -> domain.JudgeCalibrationCase:
+    return domain.JudgeCalibrationCase(
+        input="what is 2+2?",
+        output="4",
+        reference="4" if judge is not None else None,
+        human_pass=human,
+        judge_pass=judge,
+        judge_score=None if judge is None else (0.95 if judge else 0.05),
+        judge_reasoning=None if judge is None else "matches the reference",
+        error=error,
+    )
+
+
+def test_judge_calibration_round_trip(sessions: Sessions) -> None:
+    cases = (
+        _calibration_case(human=True, judge=True),
+        _calibration_case(human=False, judge=False),
+        _calibration_case(human=True, judge=False),
+        _calibration_case(human=True, judge=None, error="ProviderError: unreachable"),
+    )
+    calibration = domain.JudgeCalibration(
+        judge_provider=ProviderName.ANTHROPIC,
+        judge_model="claude-3-5-haiku",
+        judge_name="correctness",
+        judge_temperature=0.0,
+        rubric_id="judge-v1",
+        metrics=domain.JudgeCalibrationMetrics(
+            total=4,
+            scored=3,
+            failures=1,
+            agreements=2,
+            agreement_rate=2 / 3,
+            true_positives=1,
+            true_negatives=1,
+            false_positives=0,
+            false_negatives=1,
+            precision=1.0,
+            recall=0.5,
+            f1=None,
+        ),
+        cases=cases,
+    )
+
+    with unit_of_work(sessions) as session:
+        JudgeCalibrationRepository(session).add(calibration)
+
+    with unit_of_work(sessions) as session:
+        loaded = JudgeCalibrationRepository(session).get(calibration.id)
+        listed = JudgeCalibrationRepository(session).list_all()
+
+    assert loaded == calibration  # full structural equality: metrics + ordered cases
+    assert [c.id for c in listed] == [calibration.id]
+    assert loaded is not None
+    assert loaded.metrics.f1 is None and loaded.metrics.agreement_rate == 2 / 3
+    assert loaded.cases[3].judge_pass is None and "unreachable" in (loaded.cases[3].error or "")
+    assert loaded.cases[0].judge_reasoning == "matches the reference"
+
+
+def test_missing_judge_calibration_is_none(sessions: Sessions) -> None:
+    with unit_of_work(sessions) as session:
+        assert JudgeCalibrationRepository(session).get("nope") is None
 
 
 def test_experiment_round_trip_with_and_without_policy(sessions: Sessions) -> None:

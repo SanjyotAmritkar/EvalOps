@@ -1,10 +1,11 @@
-"""LLM-judge evaluator foundation (CP 6.1).
+"""LLM-judge evaluator (CP 6.1) plus the shared judging primitive used by
+calibration (CP 6.2).
 
 A small, deliberately minimal ``Evaluator`` that asks a configured
 ``ProviderClient`` to score a candidate output against the case input and an
 optional reference answer, using a fixed rubric this module owns.
 
-Scope for CP 6.1:
+Scope:
 
 * one rubric, one structured verdict (``pass``/``fail`` + optional ``score``);
 * the judge's provider/model are configured **independently** of the system
@@ -12,9 +13,8 @@ Scope for CP 6.1:
 * low temperature by default;
 * malformed judge output raises :class:`~evalops.errors.JudgeError` -- it never
   degrades to a silent pass. Because the runner lets an evaluator exception
-  propagate, this aborts the run loudly.
-
-Calibration / judge-vs-human agreement metrics are **not** here; that is CP 6.2.
+  propagate, this aborts a run loudly. (Calibration catches it per example
+  instead -- see :mod:`evalops.calibration`.)
 """
 
 from __future__ import annotations
@@ -43,13 +43,21 @@ JUDGE_RUBRIC = (
     "CANDIDATE ANSWER:\n{output}\n"
 )
 
-_JUDGE_MODEL_VERSION = "judge-v1"
+#: Identity of the rubric above -- persisted with a calibration so a stored
+#: result records *which* rubric produced it. Bump when JUDGE_RUBRIC changes.
+JUDGE_RUBRIC_ID = "judge-v1"
+
+_JUDGE_MODEL_VERSION = JUDGE_RUBRIC_ID
 
 
 @dataclass(frozen=True, slots=True)
-class _Verdict:
+class JudgeVerdict:
+    """One structured judgement: the binary verdict, its score, and the judge's
+    stated reasoning (if it supplied one)."""
+
     passed: bool
     score: float
+    reasoning: str | None = None
 
 
 def render_judge_prompt(case_input: str, candidate_output: str, reference: str | None) -> str:
@@ -60,7 +68,7 @@ def render_judge_prompt(case_input: str, candidate_output: str, reference: str |
     )
 
 
-def parse_judge_verdict(text: str, *, evaluator: str) -> _Verdict:
+def parse_judge_verdict(text: str, *, evaluator: str) -> JudgeVerdict:
     """Parse a judge reply into a verdict, or raise :class:`JudgeError`.
 
     Tolerates a single ``{...}`` object embedded in surrounding prose or a
@@ -94,7 +102,12 @@ def parse_judge_verdict(text: str, *, evaluator: str) -> _Verdict:
     else:
         score = float(raw_score)
 
-    return _Verdict(passed=passed, score=score)
+    raw_reasoning = obj.get("reasoning")
+    reasoning = (
+        raw_reasoning.strip() if isinstance(raw_reasoning, str) and raw_reasoning.strip() else None
+    )
+
+    return JudgeVerdict(passed=passed, score=score, reasoning=reasoning)
 
 
 def _extract_json_object(text: str) -> dict[str, Any] | None:
@@ -137,8 +150,16 @@ class LLMJudge:
 
     family: ClassVar[EvaluatorFamily] = EvaluatorFamily.LLM_JUDGE
 
-    def evaluate(self, run: EvaluationRun, reference: DatasetCase) -> EvaluatorScore:
-        prompt = render_judge_prompt(reference.input, run.output, reference.expected_output)
+    def judge(
+        self, *, case_input: str, candidate_output: str, reference: str | None
+    ) -> JudgeVerdict:
+        """Run the judge once and return its structured verdict.
+
+        Raises :class:`~evalops.domain.contracts.ProviderError` if the judge
+        provider call fails, and :class:`~evalops.errors.JudgeError` if its
+        reply cannot be parsed. Shared by :meth:`evaluate` and by calibration.
+        """
+        prompt = render_judge_prompt(case_input, candidate_output, reference)
         judge_config = SystemVersion(
             project_id="judge",
             name=self.name,
@@ -148,9 +169,15 @@ class LLMJudge:
             prompt_template="${input}",
             parameters={"temperature": self.temperature},
         )
-        # A ProviderError here propagates untouched (judge provider failure).
         response = self.provider_client.complete(prompt, judge_config)
-        verdict = parse_judge_verdict(response.text, evaluator=self.name)
+        return parse_judge_verdict(response.text, evaluator=self.name)
+
+    def evaluate(self, run: EvaluationRun, reference: DatasetCase) -> EvaluatorScore:
+        verdict = self.judge(
+            case_input=reference.input,
+            candidate_output=run.output,
+            reference=reference.expected_output,
+        )
         return EvaluatorScore(
             evaluator=self.name,
             family=EvaluatorFamily.LLM_JUDGE,

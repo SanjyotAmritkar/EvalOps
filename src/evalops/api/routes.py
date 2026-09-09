@@ -8,7 +8,7 @@ via the exception handlers registered in ``main``.
 
 from __future__ import annotations
 
-from typing import TypeVar
+from typing import Any, TypeVar
 
 from fastapi import APIRouter, HTTPException, status
 
@@ -22,6 +22,8 @@ from evalops.api.schemas import (
     EvaluationRunRead,
     ExperimentCreate,
     ExperimentRead,
+    JudgeCalibrationCreate,
+    JudgeCalibrationRead,
     ProjectCreate,
     ProjectRead,
     ReleasePolicyCreate,
@@ -31,18 +33,22 @@ from evalops.api.schemas import (
     SystemVersionCreate,
     SystemVersionRead,
 )
+from evalops.calibration import calibrate_judge
 from evalops.db import (
     AsyncJobRepository,
     DatasetRepository,
     EvaluationResultRepository,
     EvaluationRunRepository,
     ExperimentRepository,
+    JudgeCalibrationRepository,
     ProjectRepository,
     ReleasePolicyRepository,
     SystemVersionRepository,
 )
+from evalops.evaluators import build_evaluators
 from evalops.execution_service import execute_experiment
 from evalops.gate import evaluate_gate
+from evalops.judge import LLMJudge
 from evalops.worker.tasks import DispatchError, enqueue_experiment_run
 
 _T = TypeVar("_T")
@@ -60,6 +66,7 @@ system_versions = APIRouter(tags=["system-versions"])
 release_policies = APIRouter(tags=["release-policies"])
 experiments = APIRouter(tags=["experiments"])
 jobs = APIRouter(tags=["jobs"])
+judge_calibrations = APIRouter(tags=["judge-calibrations"])
 
 
 # --- projects ---------------------------------------------------------
@@ -304,4 +311,65 @@ def list_experiment_results(experiment_id: str, session: SessionDep) -> list[Eva
     ]
 
 
-ROUTERS = (projects, datasets, system_versions, release_policies, experiments, jobs)
+# --- LLM-judge calibration (Phase 6, CP 6.2) --------------------
+
+
+@judge_calibrations.post("/judge-calibrations", status_code=status.HTTP_201_CREATED)
+def create_judge_calibration(
+    body: JudgeCalibrationCreate, session: SessionDep
+) -> JudgeCalibrationRead:
+    """Run one configured LLM judge over the supplied human-labeled examples,
+    persist the agreement metrics + per-case detail, and return it.
+
+    Calibration is pure measurement -- it does not touch release gating and
+    never disables a judge. A judge/provider failure on an example is recorded
+    on that case, not raised. API keys come from the environment only; a
+    missing key is a 422 (``ConfigError``).
+    """
+    judge_spec: dict[str, Any] = {
+        "type": "llm_judge",
+        "provider": body.provider,
+        "model": body.model,
+    }
+    if body.name is not None:
+        judge_spec["name"] = body.name
+    if body.temperature is not None:
+        judge_spec["temperature"] = body.temperature
+    if body.base_url is not None:
+        judge_spec["base_url"] = body.base_url
+    (judge,) = build_evaluators([judge_spec])
+    assert isinstance(judge, LLMJudge)  # build_evaluators guarantees it for this type
+
+    examples = [
+        domain.LabeledJudgeExample(
+            input=example.input,
+            output=example.output,
+            human_pass=example.human_pass,
+            reference=example.reference,
+        )
+        for example in body.examples
+    ]
+    calibration = calibrate_judge(judge, examples)
+    stored = JudgeCalibrationRepository(session).add(calibration)
+    return JudgeCalibrationRead.of(stored)
+
+
+@judge_calibrations.get("/judge-calibrations/{calibration_id}")
+def get_judge_calibration(calibration_id: str, session: SessionDep) -> JudgeCalibrationRead:
+    return JudgeCalibrationRead.of(
+        _found(
+            JudgeCalibrationRepository(session).get(calibration_id),
+            "judge calibration not found",
+        )
+    )
+
+
+ROUTERS = (
+    projects,
+    datasets,
+    system_versions,
+    release_policies,
+    experiments,
+    jobs,
+    judge_calibrations,
+)

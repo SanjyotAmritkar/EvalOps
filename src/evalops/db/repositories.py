@@ -264,3 +264,34 @@ class AsyncJobRepository:
         row.completed_at = at or utcnow()
         _flush(self._session, "AsyncJob")
         return mapping.async_job_from_orm(row)
+
+
+class JudgeCalibrationRepository:
+    """Persist and load :class:`~evalops.domain.JudgeCalibration` results.
+
+    ``add`` inserts the calibration and its cases in one flush (cascade). No
+    updates -- a calibration result is immutable once written.
+    """
+
+    def __init__(self, session: Session) -> None:
+        self._session = session
+
+    def add(self, calibration: domain.JudgeCalibration) -> domain.JudgeCalibration:
+        _add(
+            self._session,
+            mapping.judge_calibration_to_orm(calibration),
+            "JudgeCalibration",
+        )
+        return calibration
+
+    def get(self, calibration_id: str) -> domain.JudgeCalibration | None:
+        row = self._session.get(orm.JudgeCalibration, calibration_id)
+        return None if row is None else mapping.judge_calibration_from_orm(row)
+
+    def list_all(self) -> list[domain.JudgeCalibration]:
+        rows = self._session.scalars(
+            select(orm.JudgeCalibration).order_by(
+                orm.JudgeCalibration.created_at, orm.JudgeCalibration.id
+            )
+        )
+        return [mapping.judge_calibration_from_orm(row) for row in rows]

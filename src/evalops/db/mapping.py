@@ -366,3 +366,84 @@ def async_job_from_orm(row: orm.AsyncJob) -> domain.AsyncJob:
         started_at=None if row.started_at is None else _aware(row.started_at),
         completed_at=None if row.completed_at is None else _aware(row.completed_at),
     )
+
+
+# --- JudgeCalibration + JudgeCalibrationCase (Phase 6, CP 6.2) -------
+
+
+def judge_calibration_to_orm(value: domain.JudgeCalibration) -> orm.JudgeCalibration:
+    m = value.metrics
+    return orm.JudgeCalibration(
+        id=value.id,
+        created_at=value.created_at,
+        judge_provider=value.judge_provider,
+        judge_model=value.judge_model,
+        judge_name=value.judge_name,
+        judge_temperature=value.judge_temperature,
+        rubric_id=value.rubric_id,
+        total=m.total,
+        scored=m.scored,
+        failures=m.failures,
+        agreements=m.agreements,
+        agreement_rate=m.agreement_rate,
+        true_positives=m.true_positives,
+        true_negatives=m.true_negatives,
+        false_positives=m.false_positives,
+        false_negatives=m.false_negatives,
+        precision=m.precision,
+        recall=m.recall,
+        f1=m.f1,
+        cases=[
+            orm.JudgeCalibrationCase(
+                position=position,
+                input=case.input,
+                output=case.output,
+                reference=case.reference,
+                human_pass=case.human_pass,
+                judge_pass=case.judge_pass,
+                judge_score=case.judge_score,
+                judge_reasoning=case.judge_reasoning,
+                error=case.error,
+            )
+            for position, case in enumerate(value.cases)
+        ],
+    )
+
+
+def judge_calibration_from_orm(row: orm.JudgeCalibration) -> domain.JudgeCalibration:
+    return domain.JudgeCalibration(
+        id=row.id,
+        created_at=_aware(row.created_at),
+        judge_provider=row.judge_provider,
+        judge_model=row.judge_model,
+        judge_name=row.judge_name,
+        judge_temperature=row.judge_temperature,
+        rubric_id=row.rubric_id,
+        metrics=domain.JudgeCalibrationMetrics(
+            total=row.total,
+            scored=row.scored,
+            failures=row.failures,
+            agreements=row.agreements,
+            agreement_rate=row.agreement_rate,
+            true_positives=row.true_positives,
+            true_negatives=row.true_negatives,
+            false_positives=row.false_positives,
+            false_negatives=row.false_negatives,
+            precision=row.precision,
+            recall=row.recall,
+            f1=row.f1,
+        ),
+        cases=tuple(
+            domain.JudgeCalibrationCase(
+                input=case.input,
+                output=case.output,
+                reference=case.reference,
+                human_pass=case.human_pass,
+                judge_pass=case.judge_pass,
+                judge_score=case.judge_score,
+                judge_reasoning=case.judge_reasoning,
+                error=case.error,
+            )
+            for case in row.cases
+        ),
+    )

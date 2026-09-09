@@ -58,6 +58,8 @@ _EXPECTED_TABLES = {
     "metric_comparison",
     "metric_evidence",
     "async_job",
+    "judge_calibration",
+    "judge_calibration_case",
 }
 
 

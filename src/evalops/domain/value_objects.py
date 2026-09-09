@@ -176,3 +176,98 @@ class MetricEvidence:
                 raise DomainValidationError(
                     f"MetricEvidence.{label}.n ({summary.n}) != n_pairs ({self.n_pairs})"
                 )
+
+
+# --- LLM judge calibration (Phase 6, CP 6.2) ---------------------------
+
+
+@dataclass(frozen=True, slots=True)
+class LabeledJudgeExample:
+    """One human-labeled example for judge calibration.
+
+    The minimal unit: the case ``input``, the system ``output`` a judge would
+    score, an optional ``reference`` answer, and the human ``human_pass``
+    verdict (True == a human considers the output acceptable).
+    """
+
+    input: str
+    output: str
+    human_pass: bool
+    reference: str | None = None
+
+    def __post_init__(self) -> None:
+        if not self.input.strip():
+            raise DomainValidationError("LabeledJudgeExample.input must be a non-empty string")
+        if not self.output.strip():
+            raise DomainValidationError("LabeledJudgeExample.output must be a non-empty string")
+
+
+@dataclass(frozen=True, slots=True)
+class JudgeCalibrationCase:
+    """One labeled example after the judge has scored it -- everything needed to
+    inspect an individual agreement/disagreement.
+
+    ``judge_pass`` is ``None`` exactly when the judge failed on this example
+    (``error`` set); such a case is excluded from every metric, never counted
+    as agreement.
+    """
+
+    input: str
+    output: str
+    reference: str | None
+    human_pass: bool
+    judge_pass: bool | None
+    judge_score: float | None
+    judge_reasoning: str | None
+    error: str | None
+
+    def __post_init__(self) -> None:
+        failed = self.judge_pass is None
+        if failed != (self.error is not None):
+            raise DomainValidationError(
+                "JudgeCalibrationCase.error must be set iff judge_pass is None"
+            )
+        if self.judge_score is not None and not 0.0 <= self.judge_score <= 1.0:
+            raise DomainValidationError(
+                f"JudgeCalibrationCase.judge_score must be within [0, 1], got {self.judge_score!r}"
+            )
+
+
+@dataclass(frozen=True, slots=True)
+class JudgeCalibrationMetrics:
+    """Aggregate judge-vs-human agreement over one calibration set.
+
+    ``scored`` == examples the judge actually returned a verdict for
+    (``total - failures``); every rate is over ``scored``. ``None`` marks an
+    undefined metric (a zero denominator), never guessed as 0.
+
+    The positive class is "pass": TP == human & judge both pass, FP == judge
+    pass but human fail, FN == judge fail but human pass, TN == both fail.
+    """
+
+    total: int
+    scored: int
+    failures: int
+    agreements: int
+    agreement_rate: float | None
+    true_positives: int
+    true_negatives: int
+    false_positives: int
+    false_negatives: int
+    precision: float | None
+    recall: float | None
+    f1: float | None
+
+    def __post_init__(self) -> None:
+        for name in ("total", "scored", "failures", "agreements"):
+            if getattr(self, name) < 0:
+                raise DomainValidationError(f"JudgeCalibrationMetrics.{name} must be >= 0")
+        if self.scored + self.failures != self.total:
+            raise DomainValidationError(
+                "JudgeCalibrationMetrics: scored + failures must equal total"
+            )
+        confusion = (
+            self.true_positives + self.true_negatives + self.false_positives + self.false_negatives
+        )
+        if confusion != self.scored:
+            raise DomainValidationError("JudgeCalibrationMetrics: TP+TN+FP+FN must equal scored")

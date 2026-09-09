@@ -372,3 +372,73 @@ class MetricEvidence(Base):
     seed: Mapped[int] = mapped_column(BigInteger, nullable=False)
 
     evaluation_result: Mapped[EvaluationResult] = relationship(back_populates="evidence")
+
+
+class JudgeCalibration(Base):
+    """A run of one configured LLM judge against a human-labeled set (Phase 6,
+    CP 6.2). Judge identity + config metadata and the aggregate agreement
+    metrics are flat columns; per-example detail lives in
+    ``judge_calibration_case``. Standalone -- no experiment/project FK, since
+    calibration is separate from release gating. Never stores credentials."""
+
+    __tablename__ = "judge_calibration"
+    __table_args__ = (
+        CheckConstraint("judge_temperature >= 0.0", name="judge_temperature_nonneg"),
+        CheckConstraint("total >= 0 AND scored >= 0 AND failures >= 0", name="counts_nonneg"),
+    )
+
+    id: Mapped[str] = _id_column()
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    judge_provider: Mapped[ProviderName] = mapped_column(
+        _enum(ProviderName, "provider_name"), nullable=False
+    )
+    judge_model: Mapped[str] = mapped_column(String(200), nullable=False)
+    judge_name: Mapped[str] = mapped_column(String(200), nullable=False)
+    judge_temperature: Mapped[float] = mapped_column(Float, nullable=False)
+    rubric_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    total: Mapped[int] = mapped_column(Integer, nullable=False)
+    scored: Mapped[int] = mapped_column(Integer, nullable=False)
+    failures: Mapped[int] = mapped_column(Integer, nullable=False)
+    agreements: Mapped[int] = mapped_column(Integer, nullable=False)
+    agreement_rate: Mapped[float | None] = mapped_column(Float, nullable=True)
+    true_positives: Mapped[int] = mapped_column(Integer, nullable=False)
+    true_negatives: Mapped[int] = mapped_column(Integer, nullable=False)
+    false_positives: Mapped[int] = mapped_column(Integer, nullable=False)
+    false_negatives: Mapped[int] = mapped_column(Integer, nullable=False)
+    precision: Mapped[float | None] = mapped_column(Float, nullable=True)
+    recall: Mapped[float | None] = mapped_column(Float, nullable=True)
+    f1: Mapped[float | None] = mapped_column(Float, nullable=True)
+
+    cases: Mapped[list[JudgeCalibrationCase]] = relationship(
+        back_populates="calibration",
+        cascade="all, delete-orphan",
+        order_by="JudgeCalibrationCase.position",
+        passive_deletes=True,
+    )
+
+
+class JudgeCalibrationCase(Base):
+    __tablename__ = "judge_calibration_case"
+    __table_args__ = (
+        CheckConstraint(
+            "(judge_pass IS NULL) = (error IS NOT NULL)", name="error_iff_judge_failed"
+        ),
+    )
+
+    calibration_id: Mapped[str] = mapped_column(
+        String(ID_LENGTH),
+        ForeignKey("judge_calibration.id", ondelete="CASCADE"),
+        primary_key=True,
+        index=True,
+    )
+    position: Mapped[int] = mapped_column(Integer, primary_key=True)
+    input: Mapped[str] = mapped_column(Text, nullable=False)
+    output: Mapped[str] = mapped_column(Text, nullable=False)
+    reference: Mapped[str | None] = mapped_column(Text, nullable=True)
+    human_pass: Mapped[bool] = mapped_column(nullable=False)
+    judge_pass: Mapped[bool | None] = mapped_column(nullable=True)
+    judge_score: Mapped[float | None] = mapped_column(Float, nullable=True)
+    judge_reasoning: Mapped[str | None] = mapped_column(Text, nullable=True)
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    calibration: Mapped[JudgeCalibration] = relationship(back_populates="cases")
