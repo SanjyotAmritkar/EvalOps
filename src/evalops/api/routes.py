@@ -354,6 +354,15 @@ def create_judge_calibration(
     return JudgeCalibrationRead.of(stored)
 
 
+@judge_calibrations.get("/judge-calibrations")
+def list_judge_calibrations(session: SessionDep) -> list[JudgeCalibrationRead]:
+    """Every persisted calibration, oldest first. Read-only -- no new semantics."""
+    return [
+        JudgeCalibrationRead.of(calibration)
+        for calibration in JudgeCalibrationRepository(session).list_all()
+    ]
+
+
 @judge_calibrations.get("/judge-calibrations/{calibration_id}")
 def get_judge_calibration(calibration_id: str, session: SessionDep) -> JudgeCalibrationRead:
     return JudgeCalibrationRead.of(

@@ -300,3 +300,70 @@ export interface AsyncJob {
   error: string | null;
   celery_task_id: string | null;
 }
+
+// --- LLM-judge calibration (Phase 6, CP 6.3) --------------------------
+
+/** One human-labeled example sent to POST /judge-calibrations. */
+export interface LabeledJudgeExampleInput {
+  input: string;
+  output: string;
+  human_pass: boolean;
+  reference?: string | null;
+}
+
+export interface JudgeCalibrationCreate {
+  provider: ProviderName;
+  model: string;
+  name?: string;
+  temperature?: number;
+  base_url?: string;
+  examples: LabeledJudgeExampleInput[];
+}
+
+/**
+ * Aggregate judge-vs-human agreement (mirrors JudgeCalibrationMetricsRead).
+ * Every value is backend-computed; a `null` ratio is an undefined metric
+ * (zero denominator) and must render as "N/A", never 0. `scored` excludes
+ * cases where the judge call failed.
+ */
+export interface JudgeCalibrationMetrics {
+  total: number;
+  scored: number;
+  failures: number;
+  agreements: number;
+  agreement_rate: number | null;
+  true_positives: number;
+  true_negatives: number;
+  false_positives: number;
+  false_negatives: number;
+  precision: number | null;
+  recall: number | null;
+  f1: number | null;
+}
+
+/** One labeled example after the judge scored it. `judge_pass === null` (with
+ * `error` set) means the judge call failed and this case is excluded from the
+ * metrics above. */
+export interface JudgeCalibrationCase {
+  input: string;
+  output: string;
+  reference: string | null;
+  human_pass: boolean;
+  judge_pass: boolean | null;
+  judge_score: number | null;
+  judge_reasoning: string | null;
+  error: string | null;
+}
+
+/** Mirrors JudgeCalibrationRead (GET/POST /judge-calibrations). */
+export interface JudgeCalibration {
+  id: string;
+  created_at: string;
+  judge_provider: ProviderName;
+  judge_model: string;
+  judge_name: string;
+  judge_temperature: number;
+  rubric_id: string;
+  metrics: JudgeCalibrationMetrics;
+  cases: JudgeCalibrationCase[];
+}

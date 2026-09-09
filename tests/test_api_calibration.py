@@ -155,3 +155,22 @@ def test_empty_examples_list_is_a_422(client: TestClient, monkeypatch: pytest.Mo
 
 def test_retrieve_unknown_calibration_is_404(client: TestClient) -> None:
     assert client.get("/judge-calibrations/does-not-exist").status_code == 404
+
+
+def test_list_returns_persisted_calibrations_oldest_first(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("OPENAI_API_KEY", _FAKE_KEY)
+    _stub_openai(monkeypatch, judge_replies=['{"verdict": "pass"}'] * 12)
+
+    assert client.get("/judge-calibrations").json() == []
+
+    first = _create(client, name="first").json()["id"]
+    second = _create(client, name="second").json()["id"]
+
+    listed = client.get("/judge-calibrations")
+    assert listed.status_code == 200
+    body = listed.json()
+    assert [c["id"] for c in body] == [first, second]
+    assert body[0]["judge_name"] == "first"
+    assert "metrics" in body[0] and "cases" in body[0]

@@ -16,6 +16,10 @@ export const queryKeys = {
   releasePolicies: {
     all: ["release-policies"] as const,
   },
+  judgeCalibrations: {
+    all: ["judge-calibrations"] as const,
+    detail: (id: string) => ["judge-calibrations", id] as const,
+  },
   experiments: {
     forProject: (projectId: string) =>
       ["projects", projectId, "experiments"] as const,

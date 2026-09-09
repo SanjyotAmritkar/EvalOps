@@ -397,8 +397,19 @@ calibration/
 store the judge's identity and config metadata — provider, model, name,
 temperature, `rubric_id` — the aggregate metrics, and every scored case.
 **Never a credential.** Standalone: no experiment/project foreign key.
-`POST /judge-calibrations` runs and persists one; `GET
-/judge-calibrations/{id}` retrieves it.
+`POST /judge-calibrations` runs and persists one; `GET /judge-calibrations`
+lists them (oldest first); `GET /judge-calibrations/{id}` retrieves one.
+
+**Dashboard (CP 6.3).** A *Judge Calibration* tab in the project workspace
+(the resource is global, like release policies). It runs a calibration from a
+short human-labeled form and renders a persisted result: agreement rate,
+scored / failed / total, the TP/TN/FP/FN matrix, precision / recall / F1, and a
+per-example table of human verdict vs judge verdict with the judge's score and
+reasoning. Failed judge calls are shown as a distinct row and undefined metrics
+render as **N/A**. All numbers come from the API — the dashboard never
+recomputes a metric — and the API key is only ever read from the server
+environment. The copy states plainly that calibration does not affect release
+gating.
 
 **Semantics.** Calibration is pure measurement of judge trustworthiness. It is
 deliberately unconnected to the Phase 5 release gate: a low agreement rate does

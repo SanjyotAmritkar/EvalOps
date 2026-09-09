@@ -30,6 +30,11 @@ export function WorkspaceTabs({ projectId }: { projectId: string }) {
       href: `${base}/release-policies`,
       active: pathname.startsWith(`${base}/release-policies`),
     },
+    {
+      label: "Judge Calibration",
+      href: `${base}/judge-calibrations`,
+      active: pathname.startsWith(`${base}/judge-calibrations`),
+    },
   ];
 
   return (
