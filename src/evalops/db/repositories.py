@@ -9,6 +9,8 @@ violation (which also marks the surrounding transaction for rollback).
 
 from __future__ import annotations
 
+from datetime import datetime
+
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -16,15 +18,24 @@ from sqlalchemy.orm import Session
 from evalops import domain
 from evalops.db import mapping
 from evalops.db import models as orm
-from evalops.db.errors import RecordConflict
+from evalops.db.errors import RecordConflict, RecordNotFound
+from evalops.domain._time import utcnow
+from evalops.domain.enums import JobStatus
+
+#: Cap on stored failure text -- keep the row small and bounded.
+_MAX_ERROR_LEN = 2000
 
 
-def _add(session: Session, row: object, entity: str) -> None:
-    session.add(row)
+def _flush(session: Session, entity: str) -> None:
     try:
         session.flush()
     except IntegrityError as exc:
         raise RecordConflict(f"{entity} conflicts with an existing record: {exc.orig}") from exc
+
+
+def _add(session: Session, row: object, entity: str) -> None:
+    session.add(row)
+    _flush(session, entity)
 
 
 class ProjectRepository:
@@ -176,3 +187,80 @@ class EvaluationResultRepository:
             .order_by(orm.EvaluationResult.created_at, orm.EvaluationResult.id)
         )
         return [mapping.evaluation_result_from_orm(row) for row in rows]
+
+
+def _bound_error(text: str) -> str:
+    cleaned = text.strip()
+    if len(cleaned) > _MAX_ERROR_LEN:
+        cleaned = cleaned[: _MAX_ERROR_LEN - 1] + "…"
+    return cleaned or "unknown error"
+
+
+class AsyncJobRepository:
+    """The durable lifecycle of a background experiment run.
+
+    ``add`` inserts a queued job. Each ``mark_*`` performs one targeted state
+    transition and flushes (never commits) -- the caller's unit of work owns
+    the transaction. Illegal transitions raise :class:`RecordConflict`; an
+    unknown job id raises :class:`RecordNotFound`.
+    """
+
+    def __init__(self, session: Session) -> None:
+        self._session = session
+
+    def add(self, job: domain.AsyncJob) -> domain.AsyncJob:
+        _add(self._session, mapping.async_job_to_orm(job), "AsyncJob")
+        return job
+
+    def get(self, job_id: str) -> domain.AsyncJob | None:
+        row = self._session.get(orm.AsyncJob, job_id)
+        return None if row is None else mapping.async_job_from_orm(row)
+
+    def _row(self, job_id: str) -> orm.AsyncJob:
+        row = self._session.get(orm.AsyncJob, job_id)
+        if row is None:
+            raise RecordNotFound(f"async job {job_id!r} not found")
+        return row
+
+    def mark_running(
+        self, job_id: str, *, celery_task_id: str | None = None, at: datetime | None = None
+    ) -> domain.AsyncJob:
+        row = self._row(job_id)
+        if row.status is not JobStatus.QUEUED:
+            raise RecordConflict(
+                f"async job {job_id!r} is {row.status.value}; only a queued job can start"
+            )
+        row.status = JobStatus.RUNNING
+        row.started_at = at or utcnow()
+        if celery_task_id is not None:
+            row.celery_task_id = celery_task_id
+        _flush(self._session, "AsyncJob")
+        return mapping.async_job_from_orm(row)
+
+    def mark_completed(
+        self, job_id: str, evaluation_result_id: str, *, at: datetime | None = None
+    ) -> domain.AsyncJob:
+        row = self._row(job_id)
+        if row.status is not JobStatus.RUNNING:
+            raise RecordConflict(
+                f"async job {job_id!r} is {row.status.value}; only a running job can complete"
+            )
+        row.status = JobStatus.COMPLETED
+        row.evaluation_result_id = evaluation_result_id
+        row.error = None
+        row.completed_at = at or utcnow()
+        _flush(self._session, "AsyncJob")
+        return mapping.async_job_from_orm(row)
+
+    def mark_failed(
+        self, job_id: str, error: str, *, at: datetime | None = None
+    ) -> domain.AsyncJob:
+        row = self._row(job_id)
+        if row.status in (JobStatus.COMPLETED, JobStatus.FAILED):
+            raise RecordConflict(f"async job {job_id!r} is already {row.status.value} (terminal)")
+        row.status = JobStatus.FAILED
+        row.error = _bound_error(error)
+        row.evaluation_result_id = None
+        row.completed_at = at or utcnow()
+        _flush(self._session, "AsyncJob")
+        return mapping.async_job_from_orm(row)

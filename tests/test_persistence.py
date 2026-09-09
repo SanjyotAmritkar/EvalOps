@@ -6,6 +6,7 @@ Fast tests run against a temp-file SQLite database with foreign keys enforced.
 from __future__ import annotations
 
 from collections.abc import Iterator
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import NamedTuple
 
@@ -15,6 +16,7 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from evalops import domain
 from evalops.db import (
+    AsyncJobRepository,
     Base,
     DatasetRepository,
     EvaluationResultRepository,
@@ -22,13 +24,14 @@ from evalops.db import (
     ExperimentRepository,
     ProjectRepository,
     RecordConflict,
+    RecordNotFound,
     ReleasePolicyRepository,
     SystemVersionRepository,
     create_db_engine,
     session_factory,
     unit_of_work,
 )
-from evalops.domain.enums import CaseOrigin, EvaluatorFamily, ProviderName
+from evalops.domain.enums import CaseOrigin, EvaluatorFamily, JobStatus, ProviderName
 
 Sessions = sessionmaker[Session]
 
@@ -427,3 +430,120 @@ def test_repository_add_does_not_commit(sessions: Sessions) -> None:
         assert ProjectRepository(session).get(project.id) is None
     finally:
         session.close()
+
+
+# --- AsyncJob lifecycle -------------------------------------------------
+
+
+def test_async_job_round_trip(sessions: Sessions, graph: Graph) -> None:
+    job = domain.AsyncJob(experiment_id=graph.experiment.id)
+    with unit_of_work(sessions) as session:
+        AsyncJobRepository(session).add(job)
+
+    with unit_of_work(sessions) as session:
+        loaded = AsyncJobRepository(session).get(job.id)
+
+    assert loaded == job
+    assert loaded is not None
+    assert loaded.status is JobStatus.QUEUED
+    assert loaded.created_at.tzinfo is not None
+    assert (loaded.started_at, loaded.completed_at, loaded.error) == (None, None, None)
+
+
+def test_async_job_queued_running_completed(sessions: Sessions, graph: Graph) -> None:
+    result = domain.EvaluationResult(experiment_id=graph.experiment.id, metrics=())
+    job = domain.AsyncJob(experiment_id=graph.experiment.id)
+    with unit_of_work(sessions) as session:
+        EvaluationResultRepository(session).add(result)
+        AsyncJobRepository(session).add(job)
+
+    with unit_of_work(sessions) as session:
+        running = AsyncJobRepository(session).mark_running(job.id, celery_task_id="t-1")
+    assert running.status is JobStatus.RUNNING
+    assert running.started_at is not None and running.celery_task_id == "t-1"
+
+    with unit_of_work(sessions) as session:
+        done = AsyncJobRepository(session).mark_completed(job.id, result.id)
+    assert done.status is JobStatus.COMPLETED
+    assert done.evaluation_result_id == result.id
+    assert done.error is None
+    assert done.completed_at is not None
+    assert done.created_at <= done.started_at <= done.completed_at  # type: ignore[operator]
+
+
+def test_async_job_failed_bounds_error_and_allows_queued_source(
+    sessions: Sessions, graph: Graph
+) -> None:
+    a = domain.AsyncJob(experiment_id=graph.experiment.id)
+    b = domain.AsyncJob(experiment_id=graph.experiment.id)
+    with unit_of_work(sessions) as session:
+        AsyncJobRepository(session).add(a)
+        AsyncJobRepository(session).add(b)
+
+    # running -> failed, with an over-long message
+    with unit_of_work(sessions) as session:
+        jobs = AsyncJobRepository(session)
+        jobs.mark_running(a.id)
+        failed = jobs.mark_failed(a.id, "boom " * 2000)
+    assert failed.status is JobStatus.FAILED
+    assert failed.evaluation_result_id is None
+    assert failed.error is not None and len(failed.error) <= 2000
+    assert failed.completed_at is not None
+
+    # queued -> failed is allowed (never started)
+    with unit_of_work(sessions) as session:
+        from_queued = AsyncJobRepository(session).mark_failed(b.id, "rejected before start")
+    assert from_queued.status is JobStatus.FAILED
+    assert from_queued.started_at is None
+
+
+def test_async_job_illegal_transitions_and_missing_id(sessions: Sessions, graph: Graph) -> None:
+    result = domain.EvaluationResult(experiment_id=graph.experiment.id, metrics=())
+    job = domain.AsyncJob(experiment_id=graph.experiment.id)
+    with unit_of_work(sessions) as session:
+        EvaluationResultRepository(session).add(result)
+        AsyncJobRepository(session).add(job)
+
+    with unit_of_work(sessions) as session:
+        assert AsyncJobRepository(session).get("nope") is None
+        with pytest.raises(RecordNotFound):
+            AsyncJobRepository(session).mark_running("nope")
+
+    with (
+        unit_of_work(sessions) as session,
+        pytest.raises(RecordConflict),  # can't complete a queued job
+    ):
+        AsyncJobRepository(session).mark_completed(job.id, result.id)
+
+    with unit_of_work(sessions) as session:
+        jobs = AsyncJobRepository(session)
+        jobs.mark_running(job.id)
+        with pytest.raises(RecordConflict):  # can't start twice
+            jobs.mark_running(job.id)
+
+    with unit_of_work(sessions) as session:
+        jobs = AsyncJobRepository(session)
+        jobs.mark_completed(job.id, result.id)
+        with pytest.raises(RecordConflict):  # terminal
+            jobs.mark_failed(job.id, "too late")
+
+
+def test_async_job_domain_invariants() -> None:
+    moment = datetime(2026, 1, 1, tzinfo=UTC)
+    with pytest.raises(domain.DomainValidationError):
+        domain.AsyncJob(experiment_id="e", status=JobStatus.RUNNING)  # no started_at
+    with pytest.raises(domain.DomainValidationError):
+        domain.AsyncJob(  # completed without a result
+            experiment_id="e",
+            status=JobStatus.COMPLETED,
+            created_at=moment,
+            started_at=moment,
+            completed_at=moment,
+        )
+    with pytest.raises(domain.DomainValidationError):
+        domain.AsyncJob(  # failed without an error message
+            experiment_id="e",
+            status=JobStatus.FAILED,
+            created_at=moment,
+            completed_at=moment,
+        )

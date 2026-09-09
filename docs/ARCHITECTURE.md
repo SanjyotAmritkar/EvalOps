@@ -302,13 +302,34 @@ caller-supplied session.
 
 `evalops.worker` realises that second path: a Celery app (`celery_app.py`,
 Redis broker, no result backend) and a single task (`tasks.py`,
-`evalops.execute_experiment`) that takes a JSON payload (experiment id +
-`ExecutionOptions` dict + evaluator spec dicts), rebuilds the typed config via
-the same `ExecutionOptions`, and calls `execute_experiment_in_uow` with a
-per-process session factory. No evaluation, gating, or persistence logic lives
-in the worker. Redis is broker-only; the runs and results it writes go to
-PostgreSQL through the execution service. The synchronous
-`POST /experiments/{id}/run` is unchanged; there is no async API endpoint yet.
+`evalops.execute_experiment`). No evaluation, gating, or persistence logic
+lives in the worker; it rebuilds the typed config via the same
+`ExecutionOptions` and calls `execute_experiment_in_uow` with a per-process
+session factory.
+
+**Durable job lifecycle.** An `async_job` row in PostgreSQL -- not Celery -- is
+the authoritative status of a background run (`domain.AsyncJob`,
+`AsyncJobRepository`). `enqueue_experiment_run` writes a `queued` job then
+dispatches the task with the **job id**. The task then:
+
+```
+queued --(mark_running)--> running --(mark_completed + result link)--> completed
+                              |
+                              +--(exception -> mark_failed, bounded error)--> failed
+```
+
+Each transition is its own unit of work, separate from the evaluation's unit
+of work. The evaluation runs via `execute_experiment_in_uow` (its own
+transaction); if it fails and rolls back, the task opens a *fresh* transaction
+to mark the job `failed`, so a failed evaluation is never left as a job stuck
+at `running`. Terminal states (`completed` / `failed`) are immutable;
+`AsyncJobRepository` rejects illegal transitions with `RecordConflict`. No
+distributed locking. A hard worker crash between `running` and a terminal
+state is out of scope here (Phase 4 recovery/reaping is later).
+
+Redis is broker-only; runs and results are written to PostgreSQL through the
+execution service. The synchronous `POST /experiments/{id}/run` is unchanged;
+there is no async API endpoint yet.
 
 Python code is packaged under an installable `src/evalops/` package (src layout). The frozen Phase 0 domain model lives at `src/evalops/domain/`. The entries above are `evalops` submodules — `evalops.gateway`, `evalops.eval`, `evalops.api`, `evalops.worker`, `evalops.ci` — not top-level directories; non-Python trees (`datasets/`, `dashboard/`, `infra/`, `docs/`) stay at the repository root. Each is created only when its phase begins.
 

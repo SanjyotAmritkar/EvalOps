@@ -14,7 +14,7 @@ from types import MappingProxyType
 from typing import Any
 
 from evalops.domain._time import utcnow
-from evalops.domain.enums import CaseOrigin, ProviderName
+from evalops.domain.enums import CaseOrigin, JobStatus, ProviderName
 from evalops.domain.errors import DomainValidationError
 from evalops.domain.ids import new_id
 from evalops.domain.value_objects import EvaluatorScore, MetricComparison, UsageMetrics
@@ -298,3 +298,74 @@ class ReleasePolicy:
                     f"ReleasePolicy threshold for {metric!r} must be >= 0, got {ceiling}"
                 )
         object.__setattr__(self, "thresholds", _read_only(self.thresholds))
+
+
+@dataclass(frozen=True, slots=True)
+class AsyncJob:
+    """A durable record of one background (async) experiment run.
+
+    An immutable snapshot: lifecycle transitions are performed by the
+    repository as targeted updates, each returning a fresh ``AsyncJob``.
+    Invariants tie the ``status`` to which timestamp / error / result fields
+    are set.
+    """
+
+    experiment_id: str
+    status: JobStatus = JobStatus.QUEUED
+    celery_task_id: str | None = None
+    evaluation_result_id: str | None = None
+    error: str | None = None
+    id: str = field(default_factory=new_id)
+    created_at: datetime = field(default_factory=utcnow)
+    started_at: datetime | None = None
+    completed_at: datetime | None = None
+
+    def __post_init__(self) -> None:
+        _require_non_empty(self.experiment_id, "AsyncJob.experiment_id")
+        _require_non_empty(self.id, "AsyncJob.id")
+        _require_aware(self.created_at, "AsyncJob.created_at")
+        for moment, label in (
+            (self.started_at, "AsyncJob.started_at"),
+            (self.completed_at, "AsyncJob.completed_at"),
+        ):
+            if moment is not None:
+                _require_aware(moment, label)
+        if self.started_at is not None and self.started_at < self.created_at:
+            raise DomainValidationError("AsyncJob.started_at is before created_at")
+        if (
+            self.completed_at is not None
+            and self.started_at is not None
+            and self.completed_at < self.started_at
+        ):
+            raise DomainValidationError("AsyncJob.completed_at is before started_at")
+        if self.error is not None and not self.error.strip():
+            raise DomainValidationError("AsyncJob.error must be non-blank when set")
+
+        if self.status is JobStatus.QUEUED:
+            if any((self.started_at, self.completed_at, self.error, self.evaluation_result_id)):
+                raise DomainValidationError(
+                    "a queued AsyncJob has no start/completion/error/result"
+                )
+        elif self.status is JobStatus.RUNNING:
+            if self.started_at is None:
+                raise DomainValidationError("a running AsyncJob has started_at")
+            if any((self.completed_at, self.error, self.evaluation_result_id)):
+                raise DomainValidationError("a running AsyncJob has no completion/error/result")
+        elif self.status is JobStatus.COMPLETED:
+            if (
+                self.started_at is None
+                or self.completed_at is None
+                or self.evaluation_result_id is None
+            ):
+                raise DomainValidationError(
+                    "a completed AsyncJob has started_at, completed_at and evaluation_result_id"
+                )
+            if self.error is not None:
+                raise DomainValidationError("a completed AsyncJob has no error")
+        else:  # JobStatus.FAILED
+            if self.completed_at is None or self.error is None:
+                raise DomainValidationError(
+                    "a failed AsyncJob has completed_at and an error message"
+                )
+            if self.evaluation_result_id is not None:
+                raise DomainValidationError("a failed AsyncJob has no evaluation_result_id")

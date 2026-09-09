@@ -28,7 +28,7 @@ from sqlalchemy import (
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from evalops.db.base import ID_LENGTH, Base, JSONMap
-from evalops.domain.enums import CaseOrigin, EvaluatorFamily, ProviderName
+from evalops.domain.enums import CaseOrigin, EvaluatorFamily, JobStatus, ProviderName
 
 
 def _enum(py_enum: type[enum.Enum], name: str) -> Enum:
@@ -268,6 +268,33 @@ class EvaluationResult(Base):
         order_by="MetricComparison.position",
         passive_deletes=True,
     )
+
+
+class AsyncJob(Base):
+    """Durable lifecycle of a background experiment run (queued -> running ->
+    completed | failed). Not an evaluation-domain concept -- execution state
+    that outlives Celery/Redis so PostgreSQL stays authoritative."""
+
+    __tablename__ = "async_job"
+
+    id: Mapped[str] = _id_column()
+    experiment_id: Mapped[str] = _fk("experiment.id")
+    status: Mapped[JobStatus] = mapped_column(
+        _enum(JobStatus, "job_status"), nullable=False, default=JobStatus.QUEUED
+    )
+    celery_task_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    evaluation_result_id: Mapped[str | None] = mapped_column(
+        String(ID_LENGTH),
+        ForeignKey("evaluation_result.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    experiment: Mapped[Experiment] = relationship()
 
 
 class MetricComparison(Base):

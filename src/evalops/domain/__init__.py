@@ -11,6 +11,7 @@ from evalops.domain.contracts import (
     ProviderResponse,
 )
 from evalops.domain.entities import (
+    AsyncJob,
     CaseResult,
     Dataset,
     DatasetCase,
@@ -21,12 +22,19 @@ from evalops.domain.entities import (
     ReleasePolicy,
     SystemVersion,
 )
-from evalops.domain.enums import CaseOrigin, EvaluatorFamily, ProviderName, ReleaseDecision
+from evalops.domain.enums import (
+    CaseOrigin,
+    EvaluatorFamily,
+    JobStatus,
+    ProviderName,
+    ReleaseDecision,
+)
 from evalops.domain.errors import DomainValidationError, EvalOpsError
 from evalops.domain.ids import EntityId, new_id
 from evalops.domain.value_objects import EvaluatorScore, MetricComparison, UsageMetrics
 
 __all__ = [
+    "AsyncJob",
     "CaseOrigin",
     "CaseResult",
     "Dataset",
@@ -40,6 +48,7 @@ __all__ = [
     "EvaluatorFamily",
     "EvaluatorScore",
     "Experiment",
+    "JobStatus",
     "MetricComparison",
     "Project",
     "ProviderClient",

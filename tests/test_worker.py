@@ -1,31 +1,34 @@
-"""The Celery experiment-execution task -- no broker, no HTTP.
+"""The durable async-job lifecycle driven by the Celery task.
 
-Direct calls run the task body synchronously. The ``eager`` fixture exercises
-Celery's dispatch path (``task_always_eager``) with no Redis.
+``.apply(throw=True)`` runs the task locally with a request context (no broker);
+the ``eager`` fixture covers ``enqueue_experiment_run`` -> dispatch.
 """
 
 from __future__ import annotations
 
-import json
 from collections.abc import Iterator
 from typing import Any
 from unittest.mock import Mock
 
 import pytest
-from pydantic import ValidationError
 from sqlalchemy.orm import Session, sessionmaker
 
+from evalops import domain
 from evalops.db import (
+    AsyncJobRepository,
     EvaluationResultRepository,
     EvaluationRunRepository,
     RecordNotFound,
     unit_of_work,
 )
+from evalops.domain.enums import JobStatus
+from evalops.errors import ConfigError
 from evalops.execution import ExecutionSpec
 from evalops.worker.celery_app import celery_app
-from evalops.worker.tasks import execute_experiment_task
+from evalops.worker.tasks import enqueue_experiment_run, execute_experiment_task
 
 _EVALUATORS: list[dict[str, Any]] = [{"type": "contains", "case_sensitive": False}]
+_MOCK: dict[str, Any] = {"backend": "mock"}
 
 
 @pytest.fixture
@@ -39,83 +42,113 @@ def eager() -> Iterator[None]:
         celery_app.conf.task_eager_propagates = False
 
 
-def _patch_target(monkeypatch: pytest.MonkeyPatch, service: Any) -> None:
-    monkeypatch.setattr("evalops.worker.tasks.execute_experiment_in_uow", service)
-    monkeypatch.setattr("evalops.worker.tasks.get_session_factory", lambda: object())
+@pytest.fixture
+def use_test_db(monkeypatch: pytest.MonkeyPatch, sessions: sessionmaker[Session]) -> None:
+    """Point the worker's session factory at the test database."""
+    monkeypatch.setattr("evalops.worker.tasks.get_session_factory", lambda: sessions)
 
 
-def test_task_delegates_to_execution_service(monkeypatch: pytest.MonkeyPatch) -> None:
-    spy = Mock(return_value=Mock(model_dump=Mock(return_value={"decision": "pass"})))
-    sentinel = object()
-    monkeypatch.setattr("evalops.worker.tasks.execute_experiment_in_uow", spy)
-    monkeypatch.setattr("evalops.worker.tasks.get_session_factory", lambda: sentinel)
-
-    result = execute_experiment_task("exp-1", {"backend": "mock"}, _EVALUATORS)
-
-    assert result == {"decision": "pass"}
-    passed = spy.call_args.args
-    assert passed[0] is sentinel  # the worker's own session factory, not a request session
-    assert passed[1] == "exp-1"
-    assert passed[2] == ExecutionSpec(backend="mock")
-    assert passed[3] == _EVALUATORS
+def _new_queued_job(sessions: sessionmaker[Session], experiment_id: str) -> str:
+    job = domain.AsyncJob(experiment_id=experiment_id)
+    with unit_of_work(sessions) as session:
+        AsyncJobRepository(session).add(job)
+    return job.id
 
 
-def test_task_reconstructs_execution_spec_from_json_payload(
-    monkeypatch: pytest.MonkeyPatch,
+def _load(sessions: sessionmaker[Session], job_id: str) -> domain.AsyncJob:
+    with unit_of_work(sessions) as session:
+        job = AsyncJobRepository(session).get(job_id)
+    assert job is not None
+    return job
+
+
+def test_enqueue_runs_job_to_completion_and_links_result(
+    eager: None,
+    use_test_db: None,
+    runnable_experiment: str,
+    sessions: sessionmaker[Session],
 ) -> None:
-    spy = Mock(return_value=Mock(model_dump=Mock(return_value={})))
-    _patch_target(monkeypatch, spy)
+    job_id = enqueue_experiment_run(runnable_experiment, _MOCK, _EVALUATORS)
 
-    payload = json.loads(
-        json.dumps({"backend": "ollama", "base_url": "http://x:11434", "timeout_seconds": 30})
-    )
-    execute_experiment_task("exp-1", payload, _EVALUATORS)
+    job = _load(sessions, job_id)
+    assert job.status is JobStatus.COMPLETED
+    assert job.error is None
+    assert job.evaluation_result_id is not None
+    assert job.celery_task_id is not None
+    assert job.started_at is not None and job.completed_at is not None
+    assert job.created_at <= job.started_at <= job.completed_at
 
-    spec = spy.call_args.args[2]
-    assert spec == ExecutionSpec(backend="ollama", base_url="http://x:11434", timeout_seconds=30.0)
-    assert isinstance(spec.timeout_seconds, float)  # int 30 in JSON -> float
-
-
-def test_task_rejects_unknown_execution_keys(monkeypatch: pytest.MonkeyPatch) -> None:
-    _patch_target(monkeypatch, Mock())
-    with pytest.raises(ValidationError):
-        execute_experiment_task("exp-1", {"backend": "mock", "bogus": 1}, _EVALUATORS)
+    with unit_of_work(sessions) as session:
+        results = EvaluationResultRepository(session).list_for_experiment(runnable_experiment)
+        runs = EvaluationRunRepository(session).list_for_experiment(runnable_experiment)
+    assert [r.id for r in results] == [job.evaluation_result_id]
+    assert len(runs) == 4
 
 
-def test_task_propagates_service_errors(monkeypatch: pytest.MonkeyPatch) -> None:
-    _patch_target(monkeypatch, Mock(side_effect=RecordNotFound("no such experiment")))
-    with pytest.raises(RecordNotFound):
-        execute_experiment_task("missing", {"backend": "mock"}, _EVALUATORS)
-
-
-def test_task_dispatches_eagerly_without_a_broker(
-    eager: None, monkeypatch: pytest.MonkeyPatch
+def test_task_marks_job_failed_and_persists_no_evaluation_data(
+    use_test_db: None,
+    runnable_experiment: str,
+    sessions: sessionmaker[Session],
 ) -> None:
-    spy = Mock(return_value=Mock(model_dump=Mock(return_value={"decision": "block"})))
-    _patch_target(monkeypatch, spy)
+    job_id = _new_queued_job(sessions, runnable_experiment)
 
-    ok = execute_experiment_task.delay("exp-1", {"backend": "mock"}, _EVALUATORS)
-    assert ok.get() == {"decision": "block"}
+    with pytest.raises(ConfigError):
+        execute_experiment_task.apply(
+            args=[job_id, _MOCK, [{"type": "regex_match"}]],  # missing 'pattern'
+            throw=True,
+        )
 
-    _patch_target(monkeypatch, Mock(side_effect=RecordNotFound("gone")))
+    job = _load(sessions, job_id)
+    assert job.status is JobStatus.FAILED
+    assert job.started_at is not None  # it reached running
+    assert job.completed_at is not None
+    assert job.error is not None and "ConfigError" in job.error
+    assert job.evaluation_result_id is None
+
+    # the evaluation transaction rolled back -- nothing partial persisted
+    with unit_of_work(sessions) as session:
+        assert EvaluationRunRepository(session).list_for_experiment(runnable_experiment) == []
+        assert EvaluationResultRepository(session).list_for_experiment(runnable_experiment) == []
+
+
+def test_unknown_job_id_raises_record_not_found(
+    use_test_db: None, sessions: sessionmaker[Session]
+) -> None:
     with pytest.raises(RecordNotFound):
-        execute_experiment_task.delay("exp-1", {"backend": "mock"}, _EVALUATORS).get()
+        execute_experiment_task.apply(args=["no-such-job", _MOCK, _EVALUATORS], throw=True)
 
 
-def test_task_persists_through_service_without_http(
+def test_task_delegates_to_the_execution_service(
+    use_test_db: None,
     runnable_experiment: str,
     sessions: sessionmaker[Session],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr("evalops.worker.tasks.get_session_factory", lambda: sessions)
-
-    result = execute_experiment_task(runnable_experiment, {"backend": "mock"}, _EVALUATORS)
-
-    assert result["decision"] == "pass"
-    assert result["counts"] == {"cases": 1, "runs": 4, "failures": 0}
-
+    # a real result row for the completed-job FK; the service call is stubbed
     with unit_of_work(sessions) as session:
-        runs = EvaluationRunRepository(session).list_for_experiment(runnable_experiment)
-        results = EvaluationResultRepository(session).list_for_experiment(runnable_experiment)
-    assert len(runs) == 4
-    assert [r.id for r in results] == [result["evaluation_result_id"]]
+        EvaluationResultRepository(session).add(
+            domain.EvaluationResult(id="res-xyz", experiment_id=runnable_experiment, metrics=())
+        )
+    spy = Mock(
+        return_value=Mock(
+            evaluation_result_id="res-xyz",
+            model_dump=Mock(return_value={"decision": "pass"}),
+        )
+    )
+    monkeypatch.setattr("evalops.worker.tasks.execute_experiment_in_uow", spy)
+
+    job_id = _new_queued_job(sessions, runnable_experiment)
+    execute_experiment_task.apply(
+        args=[job_id, {"backend": "ollama", "timeout_seconds": 30}, _EVALUATORS],
+        throw=True,
+    )
+
+    factory, experiment_id, spec, evaluators = spy.call_args.args
+    assert factory is sessions
+    assert experiment_id == runnable_experiment
+    assert spec == ExecutionSpec(backend="ollama", timeout_seconds=30.0)
+    assert evaluators == _EVALUATORS
+
+    job = _load(sessions, job_id)
+    assert job.status is JobStatus.COMPLETED
+    assert job.evaluation_result_id == "res-xyz"

@@ -36,3 +36,12 @@ class ReleaseDecision(StrEnum):
     PASS = "pass"
     BLOCK = "block"
     NEEDS_REVIEW = "needs_review"
+
+
+class JobStatus(StrEnum):
+    """Lifecycle of a background (async) experiment run. Terminal: completed / failed."""
+
+    QUEUED = "queued"
+    RUNNING = "running"
+    COMPLETED = "completed"
+    FAILED = "failed"

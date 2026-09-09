@@ -56,6 +56,7 @@ _EXPECTED_TABLES = {
     "evaluator_score",
     "evaluation_result",
     "metric_comparison",
+    "async_job",
 }
 
 

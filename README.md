@@ -304,16 +304,18 @@ export DATABASE_URL=postgresql+psycopg://evalops:evalops@localhost:5432/evalops
 uv run celery -A evalops.worker.celery_app worker --loglevel=info
 ```
 
-Enqueue an experiment run from a Python shell (nothing calls this from the API
-yet — that is a later checkpoint):
+Enqueue a run from a Python shell (nothing calls this from the API yet — that
+is a later checkpoint). This writes a durable `async_job` row
+(`queued → running → completed | failed`) and dispatches the task:
 
 ```python
-from evalops.worker.tasks import execute_experiment_task
-execute_experiment_task.delay("<experiment-id>", {"backend": "mock"}, [{"type": "contains"}])
+from evalops.worker.tasks import enqueue_experiment_run
+job_id = enqueue_experiment_run("<experiment-id>", {"backend": "mock"}, [{"type": "contains"}])
 ```
 
-The worker persists `EvaluationRun` / `EvaluationResult` rows exactly as the
-synchronous `POST /experiments/{id}/run` does.
+The worker moves the job through its states and persists `EvaluationRun` /
+`EvaluationResult` rows exactly as the synchronous `POST /experiments/{id}/run`
+does; PostgreSQL — not Redis — is the authoritative record of job status.
 
 ### Repository layout
 

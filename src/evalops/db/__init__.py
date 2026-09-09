@@ -9,6 +9,7 @@ from evalops.db.base import Base
 from evalops.db.engine import DEFAULT_DATABASE_URL, create_db_engine, database_url
 from evalops.db.errors import PersistenceError, RecordConflict, RecordNotFound
 from evalops.db.models import (
+    AsyncJob,
     CaseResult,
     Dataset,
     DatasetCase,
@@ -22,6 +23,7 @@ from evalops.db.models import (
     SystemVersion,
 )
 from evalops.db.repositories import (
+    AsyncJobRepository,
     DatasetRepository,
     EvaluationResultRepository,
     EvaluationRunRepository,
@@ -34,6 +36,8 @@ from evalops.db.session import session_factory, unit_of_work
 
 __all__ = [
     "DEFAULT_DATABASE_URL",
+    "AsyncJob",
+    "AsyncJobRepository",
     "Base",
     "CaseResult",
     "Dataset",

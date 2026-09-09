@@ -273,3 +273,34 @@ def evaluation_result_from_orm(row: orm.EvaluationResult) -> domain.EvaluationRe
             for metric in row.metrics
         ),
     )
+
+
+# --- AsyncJob -------------------------------------------------------
+
+
+def async_job_to_orm(value: domain.AsyncJob) -> orm.AsyncJob:
+    return orm.AsyncJob(
+        id=value.id,
+        experiment_id=value.experiment_id,
+        status=value.status,
+        celery_task_id=value.celery_task_id,
+        evaluation_result_id=value.evaluation_result_id,
+        error=value.error,
+        created_at=value.created_at,
+        started_at=value.started_at,
+        completed_at=value.completed_at,
+    )
+
+
+def async_job_from_orm(row: orm.AsyncJob) -> domain.AsyncJob:
+    return domain.AsyncJob(
+        id=row.id,
+        experiment_id=row.experiment_id,
+        status=row.status,
+        celery_task_id=row.celery_task_id,
+        evaluation_result_id=row.evaluation_result_id,
+        error=row.error,
+        created_at=_aware(row.created_at),
+        started_at=None if row.started_at is None else _aware(row.started_at),
+        completed_at=None if row.completed_at is None else _aware(row.completed_at),
+    )
