@@ -356,33 +356,44 @@ class EvaluationRunRead(BaseModel):
         )
 
 
-class MetricComparisonRead(BaseModel):
-    metric: str
-    baseline_value: float
-    candidate_value: float
-    delta: float
-    relative_delta: float | None
-
-
 class EvaluationResultRead(BaseModel):
+    """A persisted EvaluationResult with its release decision recomputed on read.
+
+    The decision is not stored (see G-1); it is re-derived here from the
+    persisted result plus the experiment's ReleasePolicy using the same
+    ``evaluate_gate`` the run path uses, so a refreshed results view matches
+    the original ``RunResponse``.
+    """
+
     id: str
     experiment_id: str
     created_at: datetime
-    metrics: list[MetricComparisonRead]
+    decision: str
+    gated: bool
+    reasons: list[str]
+    metrics: list[MetricLineRead]
 
     @classmethod
-    def of(cls, value: domain.EvaluationResult) -> EvaluationResultRead:
+    def of(cls, value: domain.EvaluationResult, gate: GateReport) -> EvaluationResultRead:
+        verdicts = {verdict.metric: verdict for verdict in gate.verdicts}
         return cls(
             id=value.id,
             experiment_id=value.experiment_id,
             created_at=value.created_at,
+            decision=gate.decision.value,
+            gated=gate.gated,
+            reasons=list(gate.reasons),
             metrics=[
-                MetricComparisonRead(
+                MetricLineRead(
                     metric=mc.metric,
                     baseline_value=mc.baseline_value,
                     candidate_value=mc.candidate_value,
                     delta=mc.delta,
                     relative_delta=mc.relative_delta,
+                    direction=verdicts[mc.metric].direction,
+                    threshold=verdicts[mc.metric].threshold,
+                    adverse_change=verdicts[mc.metric].adverse_change,
+                    regression=verdicts[mc.metric].regression,
                 )
                 for mc in value.metrics
             ],

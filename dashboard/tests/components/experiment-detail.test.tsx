@@ -65,7 +65,10 @@ interface RunOutcome {
   body: unknown;
 }
 
-function stubApi(runOutcome: RunOutcome | (() => Promise<RunOutcome>)) {
+function stubApi(
+  runOutcome: RunOutcome | (() => Promise<RunOutcome>),
+  persisted: { runs?: unknown[]; results?: unknown[] } = {},
+) {
   const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
     const method = (init?.method ?? "GET").toUpperCase();
     if (method === "POST" && url.endsWith("/experiments/e1/run")) {
@@ -74,8 +77,10 @@ function stubApi(runOutcome: RunOutcome | (() => Promise<RunOutcome>)) {
       return jsonResponse(outcome.body, outcome.status);
     }
     if (url.endsWith("/api/experiments/e1")) return jsonResponse(EXPERIMENT);
-    if (url.endsWith("/api/experiments/e1/runs")) return jsonResponse([]);
-    if (url.endsWith("/api/experiments/e1/results")) return jsonResponse([]);
+    if (url.endsWith("/api/experiments/e1/runs"))
+      return jsonResponse(persisted.runs ?? []);
+    if (url.endsWith("/api/experiments/e1/results"))
+      return jsonResponse(persisted.results ?? []);
     if (url.endsWith("/api/projects/p1/datasets")) return jsonResponse([DATASET]);
     if (url.endsWith("/api/projects/p1/system-versions"))
       return jsonResponse([V1, V2]);
@@ -85,6 +90,53 @@ function stubApi(runOutcome: RunOutcome | (() => Promise<RunOutcome>)) {
   vi.stubGlobal("fetch", fetchMock);
   return fetchMock;
 }
+
+const RUN_RECORD = {
+  id: "run-1",
+  system_version_id: "v1",
+  case_id: "c1",
+  repeat_index: 0,
+  output: "ok",
+  error: null,
+  usage: {
+    prompt_tokens: 1,
+    completion_tokens: 1,
+    total_tokens: 2,
+    cost_usd: 0,
+    latency_ms: 12.3,
+  },
+  scores: [],
+  created_at: "2026-09-08T13:00:00Z",
+};
+
+const PERSISTED_PASS = {
+  id: "res-persisted",
+  experiment_id: "e1",
+  created_at: "2026-09-08T13:05:00Z",
+  decision: "pass",
+  gated: true,
+  reasons: [],
+  metrics: [
+    {
+      metric: "contains.pass_rate", baseline_value: 0.9, candidate_value: 1,
+      delta: 0.1, relative_delta: 0.111, direction: "higher_is_better",
+      threshold: 0.1, adverse_change: -0.111, regression: false,
+    },
+  ],
+};
+
+const PERSISTED_BLOCK = {
+  ...PERSISTED_PASS,
+  decision: "block",
+  reasons: ["contains.pass_rate: higher-is-better regression of 50.0% (limit 10%)"],
+  metrics: [
+    {
+      metric: "contains.pass_rate", baseline_value: 1, candidate_value: 0.5,
+      delta: -0.5, relative_delta: -0.5, direction: "higher_is_better",
+      threshold: 0.1, adverse_change: 0.5, regression: true,
+    },
+  ],
+};
 
 describe("ExperimentDetailPage", () => {
   it("resolves the configuration to readable labels", async () => {
@@ -155,7 +207,12 @@ describe("ExperimentDetailPage", () => {
     );
 
     expect(await screen.findByText("BLOCK")).toBeInTheDocument();
-    expect(screen.getByText(/Why it blocked/i)).toBeInTheDocument();
+    expect(screen.getByText(/regressed beyond policy/i)).toBeInTheDocument();
+    // friendly, human-formatted blocking reason built from backend numbers
+    expect(
+      screen.getByText("P95 latency regressed 40%; policy allows up to 20%."),
+    ).toBeInTheDocument();
+    // the backend's verbatim reason string is still available (progressive disclosure)
     expect(
       screen.getByText("latency_ms.p95 regressed by 40% (tolerance 20%)"),
     ).toBeInTheDocument();
@@ -202,5 +259,44 @@ describe("ExperimentDetailPage", () => {
     expect(
       await screen.findByText(/Configuration rejected:/i),
     ).toBeInTheDocument();
+  });
+
+  // --- persisted decision (survives refresh; no in-memory run) --------------
+
+  it("shows the persisted PASS decision without a fresh run", async () => {
+    stubApi({ status: 201, body: PASS_RESPONSE }, {
+      runs: [RUN_RECORD],
+      results: [PERSISTED_PASS],
+    });
+
+    render(<ExperimentDetailPage />, { wrapper: makeWrapper() });
+
+    expect(await screen.findByText("PASS")).toBeInTheDocument();
+    expect(
+      screen.getByText(/All gated metrics stayed within the release policy/i),
+    ).toBeInTheDocument();
+    expect(screen.getByText(/decision recomputed from stored results/i)).toBeInTheDocument();
+    // friendly metric name from metric-labels.ts, raw key kept as detail
+    expect(screen.getByText("Answer quality")).toBeInTheDocument();
+    expect(screen.getByText("contains.pass_rate")).toBeInTheDocument();
+    // no run form when a result already exists
+    expect(
+      screen.queryByRole("button", { name: /run evaluation/i }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("shows the persisted BLOCK decision with a plain-English reason", async () => {
+    stubApi({ status: 201, body: PASS_RESPONSE }, {
+      runs: [RUN_RECORD, { ...RUN_RECORD, id: "run-2", system_version_id: "v2" }],
+      results: [PERSISTED_BLOCK],
+    });
+
+    render(<ExperimentDetailPage />, { wrapper: makeWrapper() });
+
+    expect(await screen.findByText("BLOCK")).toBeInTheDocument();
+    expect(
+      screen.getByText("Answer quality regressed 50%; policy allows up to 10%."),
+    ).toBeInTheDocument();
+    expect(screen.getByText("Blocked")).toBeInTheDocument(); // per-metric status
   });
 });

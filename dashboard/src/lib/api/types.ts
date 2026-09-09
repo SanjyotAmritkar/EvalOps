@@ -211,17 +211,18 @@ export interface EvaluationRun {
   created_at: string;
 }
 
-export interface MetricComparison {
-  metric: string;
-  baseline_value: number;
-  candidate_value: number;
-  delta: number;
-  relative_delta: number | null;
-}
-
+/**
+ * A persisted EvaluationResult. `decision` / `gated` / `reasons` and the
+ * per-metric verdict fields on each `MetricLine` are recomputed by the API on
+ * read from the stored result + release policy (see the G-1 fix), so this
+ * survives a page refresh and matches the original RunResponse.
+ */
 export interface EvaluationResult {
   id: string;
   experiment_id: string;
   created_at: string;
-  metrics: MetricComparison[];
+  decision: string;
+  gated: boolean;
+  reasons: string[];
+  metrics: MetricLine[];
 }

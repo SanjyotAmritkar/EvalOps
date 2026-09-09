@@ -12,10 +12,15 @@ import type { RunResponse } from "@/lib/api/types";
 import { formatDateTime, shortId } from "@/lib/format";
 import { describeThreshold, metricLabel } from "@/lib/metric-labels";
 import { useDatasets } from "@/lib/query/datasets";
-import { useExperiment, useExperimentRuns } from "@/lib/query/experiments";
+import {
+  useExperiment,
+  useExperimentResults,
+  useExperimentRuns,
+} from "@/lib/query/experiments";
 import { useReleasePolicies } from "@/lib/query/release-policies";
 import { useSystemVersions } from "@/lib/query/system-versions";
 import { PersistedHistory } from "./persisted-history";
+import { ReleaseDecision } from "./release-decision";
 import { RunForm } from "./run-form";
 import { RunSummary } from "./run-summary";
 
@@ -70,6 +75,7 @@ export default function ExperimentDetailPage() {
   const versions = useSystemVersions(projectId);
   const policies = useReleasePolicies();
   const runs = useExperimentRuns(experimentId);
+  const results = useExperimentResults(experimentId);
 
   const [justRan, setJustRan] = useState<RunResponse | null>(null);
 
@@ -113,7 +119,10 @@ export default function ExperimentDetailPage() {
       ? null
       : policies.data?.find((p) => p.id === exp.release_policy_id);
 
-  const alreadyRun = (runs.data?.length ?? 0) > 0;
+  const runList = runs.data ?? [];
+  const persistedResult = results.data?.[results.data.length - 1];
+  const runFailures = runList.filter((run) => run.error !== null).length;
+  const checkingRunState = runs.isPending || results.isPending;
   const thresholds = policy ? Object.entries(policy.thresholds) : [];
 
   return (
@@ -192,12 +201,33 @@ export default function ExperimentDetailPage() {
         <h2 className="text-lg font-semibold text-fg">Run evaluation</h2>
         {justRan ? (
           <RunSummary result={justRan} />
-        ) : runs.isPending ? (
+        ) : checkingRunState ? (
           <p className="text-sm text-fg-subtle">Checking run status…</p>
-        ) : alreadyRun ? (
+        ) : persistedResult ? (
+          <div className="flex flex-col gap-4">
+            <p className="text-sm text-fg-muted">
+              {dataset ? `${dataset.cases.length} case${dataset.cases.length === 1 ? "" : "s"} · ` : ""}
+              {runList.length} run{runList.length === 1 ? "" : "s"}
+              {runFailures > 0 ? (
+                <span className="text-block">
+                  {" "}
+                  · {runFailures} failure{runFailures === 1 ? "" : "s"}
+                </span>
+              ) : null}
+              {" · "}decision recomputed from stored results.
+            </p>
+            <ReleaseDecision
+              decision={persistedResult.decision}
+              gated={persistedResult.gated}
+              reasons={persistedResult.reasons}
+              metrics={persistedResult.metrics}
+              resultId={persistedResult.id}
+            />
+          </div>
+        ) : runList.length > 0 ? (
           <p className="text-sm text-fg-muted">
-            This experiment has already been run. Its runs and results are
-            immutable and appear under Technical details below.
+            This experiment has been run, but no evaluation result is stored.
+            Run records appear under Technical details below.
           </p>
         ) : (
           <RunForm experimentId={experimentId} onCompleted={setJustRan} />

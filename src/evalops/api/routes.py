@@ -40,6 +40,7 @@ from evalops.db import (
     ReleasePolicyRepository,
     SystemVersionRepository,
 )
+from evalops.gate import evaluate_gate
 
 _T = TypeVar("_T")
 
@@ -247,9 +248,19 @@ def list_experiment_runs(experiment_id: str, session: SessionDep) -> list[Evalua
 
 @experiments.get("/experiments/{experiment_id}/results")
 def list_experiment_results(experiment_id: str, session: SessionDep) -> list[EvaluationResultRead]:
-    _found(ExperimentRepository(session).get(experiment_id), "experiment not found")
+    experiment = _found(ExperimentRepository(session).get(experiment_id), "experiment not found")
+    policy = (
+        None
+        if experiment.release_policy_id is None
+        else _found(
+            ReleasePolicyRepository(session).get(experiment.release_policy_id),
+            "release policy not found",
+        )
+    )
+    # G-1: the release decision is not persisted -- recompute it from the stored
+    # result + policy with the same evaluate_gate the run path uses.
     return [
-        EvaluationResultRead.of(result)
+        EvaluationResultRead.of(result, evaluate_gate(result, policy))
         for result in EvaluationResultRepository(session).list_for_experiment(experiment_id)
     ]
 

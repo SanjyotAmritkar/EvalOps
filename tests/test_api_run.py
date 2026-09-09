@@ -132,6 +132,68 @@ def test_run_ungated_when_no_policy(client: TestClient) -> None:
     assert body["decision"] == "pass"
 
 
+# --- persisted release decision (G-1): recomputed on GET /results ----------
+
+
+def test_results_recompute_pass_decision_on_read(client: TestClient) -> None:
+    experiment_id = _setup(client, policy={"name": "p", "thresholds": {"latency_ms.p95": 0.5}})
+    run_body = _run(client, experiment_id, [{"type": "contains"}]).json()
+
+    results = client.get(f"/experiments/{experiment_id}/results").json()
+    assert len(results) == 1
+    result = results[0]
+    assert result["decision"] == "pass"
+    assert result["gated"] is True
+    assert result["reasons"] == []
+    gated_line = next(m for m in result["metrics"] if m["metric"] == "latency_ms.p95")
+    assert gated_line["threshold"] == 0.5
+    assert gated_line["regression"] is False
+    assert gated_line["direction"] == "lower_is_better"
+    # the read decision is identical to the synchronous run response
+    assert result["decision"] == run_body["decision"]
+    assert result["reasons"] == run_body["reasons"]
+
+
+def test_results_recompute_block_decision_on_read(client: TestClient) -> None:
+    experiment_id = _setup(
+        client,
+        baseline_latency=40,
+        candidate_latency=80,
+        policy={"name": "p", "thresholds": {"latency_ms.p95": 0.2}},
+    )
+    run_body = _run(client, experiment_id, [{"type": "contains"}]).json()
+    assert run_body["decision"] == "block"
+
+    results = client.get(f"/experiments/{experiment_id}/results").json()
+    result = results[0]
+    assert result["decision"] == "block"
+    assert result["reasons"] == run_body["reasons"]
+    assert any("latency_ms.p95" in reason for reason in result["reasons"])
+    blocking = [m for m in result["metrics"] if m["regression"]]
+    assert [m["metric"] for m in blocking] == ["latency_ms.p95"]
+    assert blocking[0]["adverse_change"] is not None
+    assert blocking[0]["threshold"] == 0.2
+
+
+def test_results_ungated_when_experiment_has_no_policy(client: TestClient) -> None:
+    experiment_id = _setup(client)  # no policy
+    _run(client, experiment_id, [{"type": "contains"}])
+
+    result = client.get(f"/experiments/{experiment_id}/results").json()[0]
+    assert result["gated"] is False
+    assert result["decision"] == "pass"
+    assert result["reasons"] == []
+    assert all(m["threshold"] is None for m in result["metrics"])
+    assert all(m["regression"] is False for m in result["metrics"])
+
+
+def test_results_empty_list_before_first_run(client: TestClient) -> None:
+    experiment_id = _setup(client, policy={"name": "p", "thresholds": {"latency_ms.p95": 0.2}})
+    response = client.get(f"/experiments/{experiment_id}/results")
+    assert response.status_code == 200
+    assert response.json() == []
+
+
 # --- provider failure handling -----------------------------------------
 
 

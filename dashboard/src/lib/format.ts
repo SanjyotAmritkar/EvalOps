@@ -72,3 +72,8 @@ export function formatSignedPercent(fraction: number | null): string {
   const percent = Number((fraction * 100).toFixed(1));
   return percent > 0 ? `+${percent}%` : `${percent}%`;
 }
+
+/** Unsigned percentage from a fraction, e.g. 0.4 → "40%". */
+export function formatPercent(fraction: number): string {
+  return `${Number((fraction * 100).toFixed(1))}%`;
+}
