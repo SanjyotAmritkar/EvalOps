@@ -67,6 +67,17 @@ const RUN_RECORD = {
   created_at: "2026-09-08T13:00:00Z",
 };
 
+const EVIDENCE_PASS = {
+  metric: "contains.pass_rate", kind: "binary", n_pairs: 8,
+  baseline: { n: 8, mean: 0.9, median: 0.9, stdev: 0.1 },
+  candidate: { n: 8, mean: 1, median: 1, stdev: 0 },
+  paired_delta: { n: 8, mean: 0.1, median: 0.1, stdev: 0.1 },
+  delta: 0.1, relative_change: 0.111, confidence_level: 0.95,
+  ci_low: 0.02, ci_high: 0.2, ci_excludes_zero: true,
+  insufficient_evidence: false, dropped_provider_failures: 0,
+  method: "paired_bootstrap_percentile",
+};
+
 const PERSISTED_PASS = {
   id: "res-persisted",
   experiment_id: "e1",
@@ -74,11 +85,13 @@ const PERSISTED_PASS = {
   decision: "pass",
   gated: true,
   reasons: [],
+  advisories: [],
+  evidence: [EVIDENCE_PASS],
   metrics: [
     {
       metric: "contains.pass_rate", baseline_value: 0.9, candidate_value: 1,
       delta: 0.1, relative_delta: 0.111, direction: "higher_is_better",
-      threshold: 0.1, adverse_change: -0.111, regression: false,
+      threshold: 0.1, adverse_change: -0.111, regression: false, gate_outcome: "pass",
     },
   ],
 };
@@ -87,11 +100,47 @@ const PERSISTED_BLOCK = {
   ...PERSISTED_PASS,
   decision: "block",
   reasons: ["contains.pass_rate: higher-is-better regression of 50.0% (limit 10%)"],
+  advisories: [],
+  evidence: [
+    {
+      ...EVIDENCE_PASS,
+      candidate: { n: 8, mean: 0.5, median: 0.5, stdev: 0.1 },
+      paired_delta: { n: 8, mean: -0.5, median: -0.5, stdev: 0.1 },
+      delta: -0.5, relative_change: -0.5, ci_low: -0.6, ci_high: -0.4,
+    },
+  ],
   metrics: [
     {
       metric: "contains.pass_rate", baseline_value: 1, candidate_value: 0.5,
       delta: -0.5, relative_delta: -0.5, direction: "higher_is_better",
-      threshold: 0.1, adverse_change: 0.5, regression: true,
+      threshold: 0.1, adverse_change: 0.5, regression: true, gate_outcome: "regression",
+    },
+  ],
+};
+
+const PERSISTED_PASS_WITH_ADVISORY = {
+  ...PERSISTED_PASS,
+  advisories: [
+    "contains.pass_rate: observed higher-is-better regression of 30.0% exceeds the 10% limit, but only 3 paired sample(s) (minimum 8) -- insufficient evidence to block; increase repeats or dataset size",
+  ],
+  evidence: [
+    {
+      ...EVIDENCE_PASS,
+      n_pairs: 3,
+      baseline: { n: 3, mean: 1, median: 1, stdev: 0 },
+      candidate: { n: 3, mean: 0.7, median: 0.7, stdev: 0.1 },
+      paired_delta: { n: 3, mean: -0.3, median: -0.3, stdev: 0.1 },
+      delta: -0.3, relative_change: -0.3,
+      ci_low: null, ci_high: null, ci_excludes_zero: false,
+      insufficient_evidence: true,
+    },
+  ],
+  metrics: [
+    {
+      metric: "contains.pass_rate", baseline_value: 1, candidate_value: 0.7,
+      delta: -0.3, relative_delta: -0.3, direction: "higher_is_better",
+      threshold: 0.1, adverse_change: 0.3, regression: false,
+      gate_outcome: "regression_low_evidence",
     },
   ],
 };
@@ -272,7 +321,7 @@ describe("ExperimentDetailPage", () => {
 
     // the persisted decision was refreshed through the existing results API
     expect(await screen.findByText("PASS")).toBeInTheDocument();
-    expect(screen.getByText("Answer quality")).toBeInTheDocument();
+    expect(screen.getAllByText("Answer quality").length).toBeGreaterThan(0);
 
     // polling has stopped now that the job is terminal
     const atTerminal = jobPollCount();
@@ -398,14 +447,15 @@ describe("ExperimentDetailPage", () => {
     expect(
       screen.getByText(/decision recomputed from stored results/i),
     ).toBeInTheDocument();
-    expect(screen.getByText("Answer quality")).toBeInTheDocument();
-    expect(screen.getByText("contains.pass_rate")).toBeInTheDocument();
+    // friendly + raw metric name appear in the table (and again in the evidence row)
+    expect(screen.getAllByText("Answer quality").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("contains.pass_rate").length).toBeGreaterThan(0);
     expect(
       screen.queryByRole("button", { name: /run evaluation/i }),
     ).not.toBeInTheDocument();
   });
 
-  it("shows the persisted BLOCK decision with a plain-English reason", async () => {
+  it("shows the persisted BLOCK decision with a plain-English reason and evidence", async () => {
     stubApi({
       runs: [RUN_RECORD, { ...RUN_RECORD, id: "run-2", system_version_id: "v2" }],
       results: [PERSISTED_BLOCK],
@@ -418,5 +468,33 @@ describe("ExperimentDetailPage", () => {
       screen.getByText("Answer quality regressed 50%; policy allows up to 10%."),
     ).toBeInTheDocument();
     expect(screen.getByText("Blocked")).toBeInTheDocument();
+    // CP 5.3: persisted evidence renders on the recomputed-from-storage path
+    expect(screen.getByText(/Statistical evidence/i)).toBeInTheDocument();
+    expect(screen.getByText(/8 paired samples/)).toBeInTheDocument();
+    expect(screen.getByText("CI supports a regression")).toBeInTheDocument();
+  });
+
+  it("shows a persisted PASS-with-advisory as not an unconditional safe pass", async () => {
+    stubApi({
+      runs: [RUN_RECORD],
+      results: [PERSISTED_PASS_WITH_ADVISORY],
+    });
+
+    render(<ExperimentDetailPage />, { wrapper: makeWrapper() });
+
+    expect(await screen.findByText("PASS")).toBeInTheDocument();
+    expect(screen.getByText(/with unverified concerns/i)).toBeInTheDocument();
+    expect(
+      screen.getByText(/Do not read this as an unconditional pass/i),
+    ).toBeInTheDocument();
+    expect(
+      screen.getAllByText(/insufficient evidence to block/i).length,
+    ).toBeGreaterThan(0);
+    expect(screen.getByText("Breach — low evidence")).toBeInTheDocument();
+    expect(screen.getByText(/95% CI not computed/)).toBeInTheDocument();
+    // still the persisted path — survives without a fresh run
+    expect(
+      screen.getByText(/decision recomputed from stored results/i),
+    ).toBeInTheDocument();
   });
 });

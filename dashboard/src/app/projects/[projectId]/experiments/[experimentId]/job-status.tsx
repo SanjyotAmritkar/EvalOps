@@ -139,6 +139,8 @@ export function JobStatus({
             reasons={result.reasons}
             metrics={result.metrics}
             resultId={result.id}
+            advisories={result.advisories}
+            evidence={result.evidence}
           />
         ) : results.isFetching ? (
           <p className="text-sm text-fg-subtle">Loading the stored result…</p>

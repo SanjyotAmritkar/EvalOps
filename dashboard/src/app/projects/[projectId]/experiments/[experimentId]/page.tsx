@@ -227,6 +227,8 @@ export default function ExperimentDetailPage() {
               reasons={persistedResult.reasons}
               metrics={persistedResult.metrics}
               resultId={persistedResult.id}
+              advisories={persistedResult.advisories}
+              evidence={persistedResult.evidence}
             />
           </div>
         ) : runList.length > 0 ? (

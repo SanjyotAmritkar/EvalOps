@@ -155,6 +155,18 @@ export interface RunRequest {
   evaluators: EvaluatorSpec[];
 }
 
+/**
+ * Per-metric gate outcome (CP 5.2). `regression` still drives BLOCK; this
+ * distinguishes a blocking regression from a threshold breach the backend
+ * held back because the statistical evidence was weak or inconclusive.
+ * Optional: a response from an older API (or a stale cache) may omit it.
+ */
+export type GateOutcome =
+  | "pass"
+  | "regression"
+  | "regression_inconclusive"
+  | "regression_low_evidence";
+
 export interface MetricLine {
   metric: string;
   baseline_value: number;
@@ -165,6 +177,38 @@ export interface MetricLine {
   threshold: number | null;
   adverse_change: number | null;
   regression: boolean;
+  gate_outcome?: GateOutcome;
+}
+
+/** Mirrors the API's SampleSummaryRead. */
+export interface SampleSummary {
+  n: number;
+  mean: number;
+  median: number;
+  stdev: number;
+}
+
+/**
+ * Mirrors the API's MetricEvidenceRead (CP 5.2): the paired-bootstrap view of
+ * one statistically supported metric. All values are backend-computed — the
+ * dashboard only formats them, never re-derives a decision.
+ */
+export interface MetricEvidence {
+  metric: string;
+  kind: "binary" | "continuous";
+  n_pairs: number;
+  baseline: SampleSummary;
+  candidate: SampleSummary;
+  paired_delta: SampleSummary;
+  delta: number;
+  relative_change: number | null;
+  confidence_level: number;
+  ci_low: number | null;
+  ci_high: number | null;
+  ci_excludes_zero: boolean;
+  insufficient_evidence: boolean;
+  dropped_provider_failures: number;
+  method: string;
 }
 
 /** The synchronous result of POST /experiments/{id}/run. */
@@ -180,6 +224,10 @@ export interface RunResponse {
   gated: boolean;
   reasons: string[];
   metrics: MetricLine[];
+  /** CP 5.2. Threshold breaches that did not BLOCK (weak/inconclusive evidence). */
+  advisories?: string[];
+  /** CP 5.2. One entry per statistically supported metric. */
+  evidence?: MetricEvidence[];
 }
 
 // --- persisted run / result history ------------------------------------
@@ -225,6 +273,10 @@ export interface EvaluationResult {
   gated: boolean;
   reasons: string[];
   metrics: MetricLine[];
+  /** CP 5.2. Recomputed on read alongside the decision, so it survives a refresh. */
+  advisories?: string[];
+  /** CP 5.2. Reconstructed from the persisted `metric_evidence` rows. */
+  evidence?: MetricEvidence[];
 }
 
 // --- asynchronous execution job ---------------------------------------

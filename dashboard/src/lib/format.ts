@@ -52,7 +52,7 @@ export function shortId(id: string): string {
 
 /** Render a comparison metric value with units appropriate to its name. */
 export function formatMetricValue(metric: string, value: number): string {
-  if (metric === "cost_usd.total") return `$${value.toFixed(4)}`;
+  if (metric.startsWith("cost_usd.")) return `$${value.toFixed(4)}`;
   if (metric.startsWith("latency_ms.")) return `${value.toFixed(1)} ms`;
   if (metric === "success_rate" || metric.endsWith(".pass_rate")) {
     return value.toFixed(3);
