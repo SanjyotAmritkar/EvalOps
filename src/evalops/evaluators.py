@@ -16,9 +16,12 @@ from typing import Any
 
 from evalops.domain.contracts import Evaluator
 from evalops.domain.entities import DatasetCase, EvaluationRun
-from evalops.domain.enums import EvaluatorFamily
+from evalops.domain.enums import EvaluatorFamily, ProviderName
 from evalops.domain.value_objects import EvaluatorScore
 from evalops.errors import ConfigError
+from evalops.judge import LLMJudge
+from evalops.ollama import DEFAULT_TIMEOUT_SECONDS
+from evalops.provider_registry import make_provider
 
 
 def _score(name: str, *, passed: bool) -> EvaluatorScore:
@@ -99,7 +102,7 @@ class RegexMatch:
         return _score(self.name, passed=re.search(self.pattern, run.output) is not None)
 
 
-_EVALUATOR_TYPES = ("exact_match", "contains", "regex_match")
+_EVALUATOR_TYPES = ("exact_match", "contains", "regex_match", "llm_judge")
 
 
 def build_evaluators(specs: Sequence[Mapping[str, Any]]) -> tuple[Evaluator, ...]:
@@ -136,6 +139,8 @@ def build_evaluators(specs: Sequence[Mapping[str, Any]]) -> tuple[Evaluator, ...
             if not isinstance(pattern, str):
                 raise ConfigError(f"{label}: missing required field 'pattern'")
             evaluator = RegexMatch(pattern=pattern, name=name or "regex_match")
+        elif evaluator_type == "llm_judge":
+            evaluator = _build_llm_judge(spec, label, name)
         else:
             raise ConfigError(
                 f"{label}.type {evaluator_type!r} is not one of {list(_EVALUATOR_TYPES)}"
@@ -155,3 +160,53 @@ def _spec_bool(spec: Mapping[str, Any], key: str, label: str, *, default: bool) 
     if not isinstance(value, bool):
         raise ConfigError(f"{label}.{key} must be a boolean")
     return value
+
+
+def _build_llm_judge(spec: Mapping[str, Any], label: str, name: str | None) -> LLMJudge:
+    """Construct an :class:`LLMJudge` from a spec.
+
+    The judge's ``provider`` / ``model`` are independent of the system under
+    evaluation. ``provider`` must be a real adapter (``openai`` / ``anthropic``
+    / ``ollama``); the API key, when needed, is required from the environment
+    here so the whole run fails fast rather than mid-loop.
+    """
+    provider_raw = spec.get("provider")
+    if not isinstance(provider_raw, str):
+        raise ConfigError(
+            f"{label}: 'llm_judge' requires a 'provider' (one of "
+            f"{sorted(p.value for p in ProviderName)})"
+        )
+    try:
+        provider_name = ProviderName(provider_raw)
+    except ValueError as exc:
+        raise ConfigError(
+            f"{label}.provider {provider_raw!r} is not one of "
+            f"{sorted(p.value for p in ProviderName)}"
+        ) from exc
+
+    model = spec.get("model")
+    if not isinstance(model, str) or not model.strip():
+        raise ConfigError(f"{label}: 'llm_judge' requires a non-empty 'model'")
+
+    temperature = spec.get("temperature", 0.0)
+    if (
+        isinstance(temperature, bool)
+        or not isinstance(temperature, (int, float))
+        or temperature < 0
+    ):
+        raise ConfigError(f"{label}.temperature must be a number >= 0")
+
+    base_url = spec.get("base_url")
+    if base_url is not None and not isinstance(base_url, str):
+        raise ConfigError(f"{label}.base_url must be a string")
+
+    client = make_provider(
+        provider_name, base_url=base_url, timeout_seconds=DEFAULT_TIMEOUT_SECONDS
+    )
+    return LLMJudge(
+        provider_name=provider_name,
+        provider_client=client,
+        model=model,
+        temperature=float(temperature),
+        name=name or "llm_judge",
+    )

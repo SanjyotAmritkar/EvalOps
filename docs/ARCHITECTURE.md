@@ -178,6 +178,48 @@ class ProviderClient:
         ...
 ```
 
+### 6.1 Provider adapters (Phase 6, CP 6.1)
+
+One `ProviderClient` contract, four adapters:
+
+| adapter | transport | credentials | usage / cost |
+|---|---|---|---|
+| `MockProvider` | none (deterministic) | none | synthetic test values |
+| `OllamaProvider` | stdlib `urllib` → local `POST /api/generate` | none | Ollama's server-reported counts + `total_duration`; `cost_usd = 0` |
+| `OpenAIProvider` | stdlib `urllib` → `POST /v1/chat/completions` | `OPENAI_API_KEY` (env only) | token counts from the response (`0` if absent, never guessed); `cost_usd = 0` (no pricing table); client-measured `latency_ms` |
+| `AnthropicProvider` | stdlib `urllib` → `POST /v1/messages` | `ANTHROPIC_API_KEY` (env only) | as OpenAI (`input_tokens` / `output_tokens`) |
+
+The hosted adapters use the repo's existing dependency-free HTTP pattern rather
+than an SDK. API keys are read from the environment at call time only — never
+stored on the object, logged, put in a run config, persisted, or serialised
+into a Celery task. Every provider/network/API failure maps to `ProviderError`.
+Adapters are built lazily, per provider actually used, so the local Ollama and
+mock paths run with **no cloud credentials**.
+
+**Cross-provider execution.** `ExecutionSpec.backend` selects the mode:
+`mock` / `ollama` (unchanged), `openai` / `anthropic` (both versions on that
+provider), and **`live`** — honour each `SystemVersion.provider` independently.
+`live` is how a baseline and candidate on *different* providers/models are
+compared (e.g. an Ollama/Llama baseline vs an OpenAI candidate, or OpenAI vs
+Anthropic). `build_providers` returns a `{ProviderName: ProviderClient}` map;
+`run_experiment` already dispatches each version to `providers[version.provider]`,
+so nothing in the `Experiment` / `SystemVersion` model changes and there is no
+special "compare providers" workflow — the existing experiment comparison is it.
+
+### 6.2 LLM judge — a separate role (Phase 6, CP 6.1)
+
+An **LLM judge is an evaluator, not a provider.** `LLMJudge` implements the
+`Evaluator` contract (family `llm_judge`) and *uses* a `ProviderClient` of its
+own — configured independently of the system under evaluation (its own
+`provider` + `model`, low temperature by default). It renders a fixed,
+version-controlled rubric over `(case input, candidate output, optional
+reference)`, requires the judge to reply with one structured JSON verdict
+(`pass`/`fail` + optional `score`), and turns that into the ordinary
+`EvaluatorScore` that flows through aggregation and gating as
+`<name>.pass_rate`. Malformed judge output raises `JudgeError` and aborts the
+run loudly — it is never a silent pass. Judge-vs-human calibration/agreement
+metrics are CP 6.2.
+
 ---
 
 ## 7. Evaluation Levels (build in this order, as extensions of the same core engine — never a separate subsystem)

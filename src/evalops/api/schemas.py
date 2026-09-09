@@ -201,7 +201,9 @@ class ExperimentRead(BaseModel):
 
 
 class ExecutionOptions(_Create):
-    backend: Literal["mock", "ollama"] = "mock"
+    # "live" honours each SystemVersion's own provider (cross-provider runs);
+    # "openai"/"anthropic" are single-provider modes. Keys are never sent here.
+    backend: Literal["mock", "ollama", "openai", "anthropic", "live"] = "mock"
     base_url: str = DEFAULT_BASE_URL
     timeout_seconds: float = DEFAULT_TIMEOUT_SECONDS
 
@@ -216,6 +218,12 @@ class EvaluatorSpec(_Create):
     name: str | None = None
     case_sensitive: bool | None = None
     pattern: str | None = None
+    # llm_judge only -- the judge's own provider/model, independent of the
+    # system under evaluation. No API key: keys come from the environment.
+    provider: str | None = None
+    model: str | None = None
+    temperature: float | None = None
+    base_url: str | None = None
 
 
 class RunRequest(_Create):

@@ -10,7 +10,7 @@ from __future__ import annotations
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, TypeVar
+from typing import Any, TypeVar, cast
 
 import yaml
 
@@ -28,10 +28,10 @@ from evalops.domain.enums import ProviderName
 from evalops.domain.errors import DomainValidationError
 from evalops.errors import ConfigError
 from evalops.evaluators import Contains, ExactMatch, build_evaluators
-from evalops.execution import ExecutionSpec, build_providers
+from evalops.execution import Backend, ExecutionSpec, build_providers
 from evalops.ollama import DEFAULT_BASE_URL, DEFAULT_TIMEOUT_SECONDS
 
-_SUPPORTED_BACKENDS = frozenset({"mock", "ollama"})
+_SUPPORTED_BACKENDS = frozenset({"mock", "ollama", "openai", "anthropic", "live"})
 
 _T = TypeVar("_T")
 
@@ -207,7 +207,8 @@ def _build_providers(
 ) -> Mapping[ProviderName, ProviderClient]:
     execution = _as_mapping(root["execution"], "execution")
     spec = ExecutionSpec(
-        backend="ollama" if backend == "ollama" else "mock",
+        # ``backend`` was validated against _SUPPORTED_BACKENDS by _read_backend.
+        backend=cast(Backend, backend),
         base_url=_opt_str(execution, "base_url", "execution", default=None) or DEFAULT_BASE_URL,
         timeout_seconds=_opt_number(
             execution, "timeout_seconds", "execution", default=DEFAULT_TIMEOUT_SECONDS

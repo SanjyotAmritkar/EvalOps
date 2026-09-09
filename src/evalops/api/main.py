@@ -15,7 +15,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from evalops.api.routes import ROUTERS
 from evalops.db import RecordConflict, RecordNotFound, session_factory
 from evalops.domain.errors import DomainValidationError
-from evalops.errors import ConfigError
+from evalops.errors import ConfigError, JudgeError
 
 
 def create_app(sessions: sessionmaker[Session] | None = None) -> FastAPI:
@@ -38,6 +38,12 @@ def create_app(sessions: sessionmaker[Session] | None = None) -> FastAPI:
     @app.exception_handler(ConfigError)
     async def _on_config_error(_: Request, exc: ConfigError) -> JSONResponse:
         return JSONResponse(status_code=422, content={"detail": str(exc)})
+
+    @app.exception_handler(JudgeError)
+    async def _on_judge_error(_: Request, exc: JudgeError) -> JSONResponse:
+        # The judge model itself returned something unusable -- an upstream
+        # problem, not a bad request. Never a silent pass.
+        return JSONResponse(status_code=502, content={"detail": str(exc)})
 
     for router in ROUTERS:
         app.include_router(router)

@@ -1,14 +1,18 @@
-"""Tests for evalops.evaluators (ExactMatch, Contains, RegexMatch)."""
+"""Tests for evalops.evaluators (ExactMatch, Contains, RegexMatch, and the
+llm_judge spec branch of build_evaluators)."""
 
 from __future__ import annotations
 
 import pytest
 
+from evalops.cloud_providers import OpenAIProvider
 from evalops.domain.contracts import Evaluator
 from evalops.domain.entities import DatasetCase, EvaluationRun
-from evalops.domain.enums import EvaluatorFamily
+from evalops.domain.enums import EvaluatorFamily, ProviderName
 from evalops.errors import ConfigError
-from evalops.evaluators import Contains, ExactMatch, RegexMatch
+from evalops.evaluators import Contains, ExactMatch, RegexMatch, build_evaluators
+from evalops.judge import LLMJudge
+from evalops.ollama import OllamaProvider
 
 
 def _run(output: str) -> EvaluationRun:
@@ -109,3 +113,47 @@ class TestRegexMatch:
     def test_invalid_pattern_is_rejected_at_construction(self) -> None:
         with pytest.raises(ConfigError):
             RegexMatch(pattern="(unclosed")
+
+
+class TestLLMJudgeSpec:
+    def test_builds_an_llm_judge_with_its_own_provider(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+        (judge,) = build_evaluators(
+            [{"type": "llm_judge", "provider": "openai", "model": "gpt-4o-mini", "name": "j"}]
+        )
+        assert isinstance(judge, LLMJudge)
+        assert judge.name == "j"
+        assert judge.provider_name is ProviderName.OPENAI
+        assert isinstance(judge.provider_client, OpenAIProvider)
+        assert judge.family is EvaluatorFamily.LLM_JUDGE
+
+    def test_judge_provider_is_independent_of_the_ollama_local_path(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # An Ollama judge needs no cloud key at all.
+        monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+        (judge,) = build_evaluators(
+            [{"type": "llm_judge", "provider": "ollama", "model": "llama3.2"}]
+        )
+        assert isinstance(judge, LLMJudge)
+        assert isinstance(judge.provider_client, OllamaProvider)
+        assert judge.temperature == 0.0
+
+    def test_missing_provider_or_model_is_rejected(self) -> None:
+        with pytest.raises(ConfigError, match="requires a 'provider'"):
+            build_evaluators([{"type": "llm_judge", "model": "m"}])
+        with pytest.raises(ConfigError, match="requires a non-empty 'model'"):
+            build_evaluators([{"type": "llm_judge", "provider": "ollama"}])
+
+    def test_unknown_judge_provider_is_rejected(self) -> None:
+        with pytest.raises(ConfigError, match="is not one of"):
+            build_evaluators([{"type": "llm_judge", "provider": "cohere", "model": "m"}])
+
+    def test_missing_api_key_fails_fast_at_build_time(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+        with pytest.raises(ConfigError, match="ANTHROPIC_API_KEY"):
+            build_evaluators([{"type": "llm_judge", "provider": "anthropic", "model": "m"}])

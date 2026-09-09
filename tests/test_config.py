@@ -10,10 +10,12 @@ from typing import Any
 import pytest
 import yaml
 
+from evalops.cloud_providers import OpenAIProvider
 from evalops.config import load_run_plan
 from evalops.domain.entities import ReleasePolicy
 from evalops.domain.enums import ProviderName
 from evalops.errors import ConfigError
+from evalops.judge import LLMJudge
 from evalops.ollama import DEFAULT_BASE_URL, OllamaProvider
 from evalops.providers import MockProvider
 
@@ -289,6 +291,87 @@ def test_backend_ollama_rejects_unsupported_generation_parameter(tmp_path: Path)
     config["candidate"]["parameters"] = {"frequency_penalty": 0.5}
     with pytest.raises(ConfigError, match="not a supported Ollama generation parameter"):
         load_run_plan(_write(tmp_path, config))
+
+
+def test_unknown_backend_is_rejected(tmp_path: Path) -> None:
+    config = _base()
+    config["execution"] = {"backend": "cohere"}
+    with pytest.raises(ConfigError, match="is not supported"):
+        load_run_plan(_write(tmp_path, config))
+
+
+def test_backend_openai_builds_a_hosted_provider(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+    config = _base()
+    config["execution"] = {"backend": "openai"}
+    for version in ("baseline", "candidate"):
+        config[version]["provider"] = "openai"
+        config[version]["parameters"] = {"temperature": 0.0}
+
+    plan = load_run_plan(_write(tmp_path, config))
+
+    assert set(plan.providers) == {ProviderName.OPENAI}
+    assert isinstance(plan.providers[ProviderName.OPENAI], OpenAIProvider)
+
+
+def test_backend_openai_without_a_key_fails_fast(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    config = _base()
+    config["execution"] = {"backend": "openai"}
+    for version in ("baseline", "candidate"):
+        config[version]["provider"] = "openai"
+        config[version].pop("parameters", None)
+    with pytest.raises(ConfigError, match="OPENAI_API_KEY"):
+        load_run_plan(_write(tmp_path, config))
+
+
+def test_backend_live_supports_a_mixed_provider_experiment(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+    config = _base()
+    config["execution"] = {"backend": "live"}
+    config["baseline"]["provider"] = "ollama"
+    config["baseline"]["model"] = "llama3.2"
+    config["baseline"].pop("parameters", None)
+    config["candidate"]["provider"] = "openai"
+    config["candidate"]["model"] = "gpt-4o-mini"
+    config["candidate"]["parameters"] = {"temperature": 0.0}
+
+    plan = load_run_plan(_write(tmp_path, config))
+
+    assert set(plan.providers) == {ProviderName.OLLAMA, ProviderName.OPENAI}
+    assert isinstance(plan.providers[ProviderName.OLLAMA], OllamaProvider)
+    assert isinstance(plan.providers[ProviderName.OPENAI], OpenAIProvider)
+    assert plan.baseline.provider is ProviderName.OLLAMA
+    assert plan.candidate.provider is ProviderName.OPENAI
+
+
+def test_llm_judge_evaluator_parses_from_yaml(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+    config = _base()
+    config["evaluators"] = [
+        {"type": "regex_match", "pattern": "."},
+        {
+            "type": "llm_judge",
+            "name": "correctness",
+            "provider": "openai",
+            "model": "gpt-4o-mini",
+            "temperature": 0.0,
+        },
+    ]
+    plan = load_run_plan(_write(tmp_path, config))
+
+    assert [e.name for e in plan.evaluators] == ["regex_match", "correctness"]
+    judge = plan.evaluators[1]
+    assert isinstance(judge, LLMJudge)
+    assert judge.provider_name is ProviderName.OPENAI and judge.model == "gpt-4o-mini"
 
 
 def test_backend_ollama_rejects_non_positive_timeout(tmp_path: Path) -> None:
