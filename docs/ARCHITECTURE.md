@@ -205,6 +205,43 @@ Do not compare raw averages (`0.86 > 0.84`) and declare a winner. LLM outputs ar
   AND p95 latency regression < 15%
   ```
 
+### 8.1 Implemented approach — paired bootstrap (Phase 5, CP 5.1)
+
+`evalops.stats` adds statistically defensible comparison primitives *alongside*
+Phase 1 aggregation. It does not change `EvaluationResult`, `ReleasePolicy`, or
+the PASS/BLOCK gate — those still run on point comparisons. It produces one
+`MetricEvidence` object per gateable metric for a later gating phase / API to
+consume.
+
+**Pairing.** Baseline and candidate runs are matched by `(case_id,
+repeat_index)`; only keys present on *both* sides are used ("comparable pairs"),
+ordered by that key so the result is deterministic. Provider-failure handling is
+per metric: `success_rate` and `<evaluator>.pass_rate` are per-run binary
+indicators where a failed run contributes `0.0` (same denominator rule
+aggregation uses); `latency_ms.mean` drops any pair where either side errored (a
+failed run has no meaningful latency, and the drop count is recorded);
+`cost_usd.mean` keeps every pair (a failed call genuinely costs ~0). Unmatched
+runs (a key on only one side — corrupt/partial data) are counted and excluded.
+
+**Statistic.** For each metric the estimator is the paired delta of means,
+`mean(candidate_i − baseline_i)`. The CI is a **percentile bootstrap**: resample
+the paired differences with replacement (`random.Random(seed)`, fixed default
+seed, default 2000 resamples, default 95%) and take the empirical quantiles.
+`ci_excludes_zero` is reported but is only meaningful when
+`insufficient_evidence` is false (fewer than 3 comparable pairs → point
+estimates only, no interval). A zero-variance difference sample collapses the
+interval to a point.
+
+**Why paired bootstrap** (not a t-test / Bayesian / analytic CI): LLM metrics
+are bounded, discrete (pass rates), skewed (latency, cost) and evaluated at
+small N — a normal-theory interval is not justified. Pairing on the same case +
+repeat removes per-case difficulty variance, so the bootstrap is over the
+*differences* and needs no distributional assumption. It is transparent, has no
+heavy dependency (standard library only), and is deterministic given the seed so
+CIs are reproducible in tests and stored results. `latency_ms.p95` and
+`cost_usd.total` stay point-only for now (a paired bootstrap of a percentile /
+total at small N is not defensible).
+
 ---
 
 ## 9. Judge Calibration Methodology
