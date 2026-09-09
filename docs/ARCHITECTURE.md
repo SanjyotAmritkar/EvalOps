@@ -283,7 +283,7 @@ Stretch (once Phase 8 exists):
 /datasets           versioned task sets (general/ + clinical/)
 /api                FastAPI routes + request/response schemas (adapts HTTP to the service)
 /execution_service  persisted experiment execution: load → run → persist → gate, HTTP-independent
-/worker             Celery tasks (Phase 4+)
+/worker             Celery worker: broker = Redis, one task -> execution_service (Phase 4)
 /dashboard          Next.js app
 /ci                 evalops gate command + GitHub Actions workflow
 /infra              docker-compose, Dockerfiles
@@ -297,8 +297,18 @@ applying the release gate. It has two entry points that differ only in
 transaction ownership: `execute_experiment(session, ...)` where the caller's
 unit of work owns commit/rollback (the FastAPI request path), and
 `execute_experiment_in_uow(sessions, ...)` which opens its own unit of work for
-callers with no request-scoped session (the Phase 4 worker). The service never
-commits a caller-supplied session.
+callers with no request-scoped session. The service never commits a
+caller-supplied session.
+
+`evalops.worker` realises that second path: a Celery app (`celery_app.py`,
+Redis broker, no result backend) and a single task (`tasks.py`,
+`evalops.execute_experiment`) that takes a JSON payload (experiment id +
+`ExecutionOptions` dict + evaluator spec dicts), rebuilds the typed config via
+the same `ExecutionOptions`, and calls `execute_experiment_in_uow` with a
+per-process session factory. No evaluation, gating, or persistence logic lives
+in the worker. Redis is broker-only; the runs and results it writes go to
+PostgreSQL through the execution service. The synchronous
+`POST /experiments/{id}/run` is unchanged; there is no async API endpoint yet.
 
 Python code is packaged under an installable `src/evalops/` package (src layout). The frozen Phase 0 domain model lives at `src/evalops/domain/`. The entries above are `evalops` submodules — `evalops.gateway`, `evalops.eval`, `evalops.api`, `evalops.worker`, `evalops.ci` — not top-level directories; non-Python trees (`datasets/`, `dashboard/`, `infra/`, `docs/`) stay at the repository root. Each is created only when its phase begins.
 

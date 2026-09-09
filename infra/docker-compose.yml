@@ -1,0 +1,21 @@
+# Local infrastructure for background execution (Phase 4).
+#
+# This brings up only the Celery broker. PostgreSQL is provided separately
+# (see the root README "Run the API"); Redis here is broker-only and holds no
+# durable state.
+#
+#   docker compose -f infra/docker-compose.yml up -d redis
+#   docker compose -f infra/docker-compose.yml down
+
+services:
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    # Broker only -- disable persistence.
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5

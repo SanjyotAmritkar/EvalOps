@@ -50,8 +50,6 @@ playground, or model leaderboard.
 
 Do not introduce these until their architecture phase requires them:
 
-- Celery
-- Redis
 - pgvector
 - OpenTelemetry
 - Prometheus
@@ -59,6 +57,9 @@ Do not introduce these until their architecture phase requires them:
 - Kubernetes
 - Kafka
 - cloud deployment infrastructure
+
+Celery + Redis are in-phase as of Phase 4 (background execution). Keep Redis
+broker-only; PostgreSQL stays the source of truth.
 
 ## Git
 

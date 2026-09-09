@@ -290,6 +290,31 @@ Set `API_PROXY_TARGET` (see `dashboard/.env.example`) if the API is not on
 build); CI runs the same on Node 22. Implemented so far: the projects list, the
 per-project workspace, and dataset / system-version / release-policy management.
 
+### Run the background worker (Phase 4)
+
+The Celery worker runs an experiment off the request path through the same
+`execute_experiment_in_uow(...)` service the API uses. It needs a Redis broker
+and the same `DATABASE_URL`. Redis is broker-only; PostgreSQL stays the source
+of truth.
+
+```bash
+docker compose -f infra/docker-compose.yml up -d redis   # broker (or run your own Redis)
+export CELERY_BROKER_URL=redis://localhost:6379/0
+export DATABASE_URL=postgresql+psycopg://evalops:evalops@localhost:5432/evalops
+uv run celery -A evalops.worker.celery_app worker --loglevel=info
+```
+
+Enqueue an experiment run from a Python shell (nothing calls this from the API
+yet — that is a later checkpoint):
+
+```python
+from evalops.worker.tasks import execute_experiment_task
+execute_experiment_task.delay("<experiment-id>", {"backend": "mock"}, [{"type": "contains"}])
+```
+
+The worker persists `EvaluationRun` / `EvaluationResult` rows exactly as the
+synchronous `POST /experiments/{id}/run` does.
+
 ### Repository layout
 
 ```
