@@ -10,7 +10,7 @@ import { Card } from "@/components/ui/card";
 import { TBody, TD, TH, THead, TR, Table } from "@/components/ui/table";
 import { apiErrorMessage } from "@/lib/api/errors";
 import type { ReleasePolicy } from "@/lib/api/types";
-import { formatFraction } from "@/lib/format";
+import { describeThreshold, metricLabel } from "@/lib/metric-labels";
 import { useReleasePolicies } from "@/lib/query/release-policies";
 import { ReleasePolicyForm } from "./release-policy-form";
 
@@ -38,10 +38,17 @@ function PolicyCard({ policy }: { policy: ReleasePolicy }) {
           <TBody>
             {thresholds.map(([metric, value]) => (
               <TR key={metric}>
-                <TD className="font-mono text-[13px]">{metric}</TD>
-                <TD className="tabular-nums text-fg-muted">
-                  {formatFraction(value)}
+                <TD>
+                  <span className="flex flex-col">
+                    <span className="font-medium text-fg">
+                      {metricLabel(metric)}
+                    </span>
+                    <span className="font-mono text-[11px] text-fg-subtle">
+                      {metric}
+                    </span>
+                  </span>
                 </TD>
+                <TD className="text-fg-muted">{describeThreshold(value)}</TD>
               </TR>
             ))}
           </TBody>
@@ -72,7 +79,10 @@ export default function ReleasePoliciesPage() {
         title="Release Policies"
         description="Thresholds that turn a baseline-vs-candidate comparison into a PASS or BLOCK decision."
         actions={
-          <Button onClick={() => setShowForm((value) => !value)}>
+          <Button
+            variant={showForm ? "ghost" : "primary"}
+            onClick={() => setShowForm((value) => !value)}
+          >
             {showForm ? "Close" : "New policy"}
           </Button>
         }

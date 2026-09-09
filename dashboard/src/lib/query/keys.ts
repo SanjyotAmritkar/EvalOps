@@ -19,5 +19,8 @@ export const queryKeys = {
   experiments: {
     forProject: (projectId: string) =>
       ["projects", projectId, "experiments"] as const,
+    detail: (id: string) => ["experiments", id] as const,
+    runs: (id: string) => ["experiments", id, "runs"] as const,
+    results: (id: string) => ["experiments", id, "results"] as const,
   },
 } as const;

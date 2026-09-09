@@ -54,7 +54,7 @@ export default function ProjectWorkspaceLayout({
   }
 
   return (
-    <PageContainer className="flex flex-col gap-6">
+    <PageContainer className="flex flex-col gap-8">
       <div className="flex flex-col gap-3">
         <Breadcrumbs
           items={[
@@ -63,14 +63,14 @@ export default function ProjectWorkspaceLayout({
           ]}
         />
         {project.isPending || !project.data ? (
-          <Skeleton className="h-7 w-56" />
+          <Skeleton className="h-8 w-64" />
         ) : (
           <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
             <h1 className="text-xl font-semibold tracking-tight text-fg">
               {project.data.name}
             </h1>
             <span className="inline-flex items-center gap-1.5">
-              <code className="font-mono text-xs text-fg-subtle">
+              <code className="font-mono text-[13px] text-fg-subtle">
                 {project.data.id}
               </code>
               <CopyButton value={project.data.id} label="Copy ID" />
@@ -81,7 +81,7 @@ export default function ProjectWorkspaceLayout({
 
       <WorkspaceTabs projectId={projectId} />
 
-      <div>{children}</div>
+      <div className="pt-2">{children}</div>
     </PageContainer>
   );
 }

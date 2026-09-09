@@ -33,7 +33,10 @@ describe("ReleasePoliciesPage", () => {
     expect(
       screen.getByText(/defined globally and can be attached to experiments/i),
     ).toBeInTheDocument();
-    expect(screen.getByText("0.1 (10%)")).toBeInTheDocument();
+    // friendly metric name + human-language threshold, raw key kept as detail
+    expect(screen.getByText("P95 latency")).toBeInTheDocument();
+    expect(screen.getByText("latency_ms.p95")).toBeInTheDocument();
+    expect(screen.getByText("Up to 10% regression")).toBeInTheDocument();
     expect(
       screen.getByText(/Safety metrics are not evaluated yet/i),
     ).toBeInTheDocument();

@@ -88,3 +88,11 @@ export function CheckIcon(props: IconProps) {
     </svg>
   );
 }
+
+export function PlayIcon(props: IconProps) {
+  return (
+    <svg {...COMMON} {...props}>
+      <path d="M6 4v16l14-8z" fill="currentColor" stroke="none" />
+    </svg>
+  );
+}

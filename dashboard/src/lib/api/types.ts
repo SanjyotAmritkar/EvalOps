@@ -112,3 +112,116 @@ export interface Experiment {
   release_policy_id: string | null;
   created_at: string;
 }
+
+export interface ExperimentCreate {
+  dataset_id: string;
+  baseline_version_id: string;
+  candidate_version_id: string;
+  repeats: number;
+  release_policy_id: string | null;
+}
+
+// --- running an experiment ------------------------------------------------
+
+export type ExecutionBackend = "mock" | "ollama";
+
+export type EvaluatorType = "exact_match" | "contains" | "regex_match";
+
+export const EVALUATOR_TYPES: readonly EvaluatorType[] = [
+  "exact_match",
+  "contains",
+  "regex_match",
+];
+
+export const OLLAMA_DEFAULT_BASE_URL = "http://localhost:11434";
+export const OLLAMA_DEFAULT_TIMEOUT_SECONDS = 120;
+
+/** Mirrors the API's EvaluatorSpec (extra fields are rejected by the server). */
+export interface EvaluatorSpec {
+  type: EvaluatorType;
+  name?: string;
+  case_sensitive?: boolean;
+  pattern?: string;
+}
+
+export interface ExecutionOptions {
+  backend: ExecutionBackend;
+  base_url?: string;
+  timeout_seconds?: number;
+}
+
+export interface RunRequest {
+  execution: ExecutionOptions;
+  evaluators: EvaluatorSpec[];
+}
+
+export interface MetricLine {
+  metric: string;
+  baseline_value: number;
+  candidate_value: number;
+  delta: number;
+  relative_delta: number | null;
+  direction: string;
+  threshold: number | null;
+  adverse_change: number | null;
+  regression: boolean;
+}
+
+/** The synchronous result of POST /experiments/{id}/run. */
+export interface RunResponse {
+  evaluation_result_id: string;
+  experiment_id: string;
+  dataset: string;
+  baseline: string;
+  candidate: string;
+  repeats: number;
+  counts: { cases: number; runs: number; failures: number };
+  decision: string;
+  gated: boolean;
+  reasons: string[];
+  metrics: MetricLine[];
+}
+
+// --- persisted run / result history ------------------------------------
+
+export interface Usage {
+  prompt_tokens: number;
+  completion_tokens: number;
+  total_tokens: number;
+  cost_usd: number;
+  latency_ms: number;
+}
+
+export interface EvaluatorScore {
+  evaluator: string;
+  family: string;
+  score: number;
+  passed: boolean | null;
+}
+
+export interface EvaluationRun {
+  id: string;
+  system_version_id: string;
+  case_id: string;
+  repeat_index: number;
+  output: string;
+  error: string | null;
+  usage: Usage;
+  scores: EvaluatorScore[];
+  created_at: string;
+}
+
+export interface MetricComparison {
+  metric: string;
+  baseline_value: number;
+  candidate_value: number;
+  delta: number;
+  relative_delta: number | null;
+}
+
+export interface EvaluationResult {
+  id: string;
+  experiment_id: string;
+  created_at: string;
+  metrics: MetricComparison[];
+}
