@@ -62,6 +62,52 @@ export function metricLabel(metric: string): string {
   return metric;
 }
 
+/**
+ * Which section a metric belongs to in the grouped comparison view. Derived
+ * from the metric identifier's shape, not a hard-coded allow-list, so unknown /
+ * future metrics still land somewhere sensible ("Quality" is the catch-all for
+ * any `<evaluator>.pass_rate` / `.mean_score`).
+ */
+export type MetricGroup = "quality" | "reliability" | "performance" | "other";
+
+export function metricGroup(metric: string): MetricGroup {
+  if (metric === "success_rate" || metric === "tool_success.pass_rate") {
+    return "reliability";
+  }
+  if (metric === "tool_success.mean_score") return "reliability";
+  if (metric.startsWith("latency_ms.") || metric.startsWith("cost_usd.")) {
+    return "performance";
+  }
+  if (metric.endsWith(".pass_rate") || metric.endsWith(".mean_score")) {
+    return "quality";
+  }
+  return "other";
+}
+
+export const METRIC_GROUP_LABEL: Record<MetricGroup, string> = {
+  quality: "Quality",
+  reliability: "Reliability",
+  performance: "Performance",
+  other: "Other",
+};
+
+/** Fixed display order for the metric groups. */
+export const METRIC_GROUP_ORDER: readonly MetricGroup[] = [
+  "quality",
+  "reliability",
+  "performance",
+  "other",
+];
+
+/** A [0,1]-normalised metric can be drawn as a comparison bar; latency/cost cannot. */
+export function isNormalizedMetric(metric: string): boolean {
+  return (
+    metric === "success_rate" ||
+    metric.endsWith(".pass_rate") ||
+    metric.endsWith(".mean_score")
+  );
+}
+
 /** Plain-language reading of a fractional regression tolerance. */
 export function describeThreshold(value: number): string {
   if (value <= 0) return "No regression allowed";

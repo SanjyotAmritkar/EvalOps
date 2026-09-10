@@ -386,6 +386,88 @@ export interface EvaluationResult {
   evidence?: MetricEvidence[];
 }
 
+// --- regression diagnostics (Phase 10, CP 10.2) ----------------------
+
+/**
+ * A candidate-side regression category. `evaluator_regression` is the generic
+ * fallback for any evaluator that is not a known RAG / agent one. A future
+ * backend may add categories, so treat this as open — {@link diagnosticCategory}
+ * has a title-case fallback.
+ */
+export type RegressionCategory =
+  | "evaluator_regression"
+  | "provider_execution_failure"
+  | "retrieval_regression"
+  | "groundedness_regression"
+  | "tool_selection_regression"
+  | "tool_argument_regression"
+  | "tool_execution_failure"
+  | "trajectory_regression"
+  | (string & {});
+
+export interface DiagnosticCategoryCount {
+  category: RegressionCategory;
+  pairs: number;
+  cases: number;
+}
+
+export interface DiagnosticEvaluatorCount {
+  evaluator: string;
+  pairs: number;
+  cases: number;
+  pass_to_fail: number;
+  score_drop: number;
+}
+
+/** A pointer to one baseline/candidate run pair; ids resolve against GET /runs. */
+export interface DiagnosticPairRef {
+  repeat_index: number;
+  baseline_run_id: string;
+  candidate_run_id: string;
+}
+
+export interface RegressingCase {
+  case_id: string;
+  categories: RegressionCategory[];
+  evaluators: string[];
+  provider_failure: boolean;
+  finding_count: number;
+  representative: DiagnosticPairRef;
+}
+
+export interface DiagnosticFinding {
+  case_id: string;
+  repeat_index: number;
+  baseline_run_id: string;
+  candidate_run_id: string;
+  category: RegressionCategory;
+  kind: "provider_failure" | "evaluator_pass_to_fail" | "evaluator_score_drop";
+  evaluator: string | null;
+  baseline_detail: string;
+  candidate_detail: string;
+}
+
+/**
+ * Deterministic, explanatory-only case-level regression diagnostics
+ * (GET /experiments/{id}/diagnostics). Every field is backend-computed from the
+ * persisted runs; nothing here is a decision. `available` is false before the
+ * first run.
+ */
+export interface RegressionDiagnostics {
+  experiment_id: string;
+  evaluation_result_id: string | null;
+  baseline_version_id: string;
+  candidate_version_id: string;
+  matched_pairs: number;
+  regressing_pairs: number;
+  regressing_cases: number;
+  available: boolean;
+  categories: DiagnosticCategoryCount[];
+  evaluators: DiagnosticEvaluatorCount[];
+  cases: RegressingCase[];
+  findings: DiagnosticFinding[];
+}
+
 // --- asynchronous execution job ---------------------------------------
 
 /**

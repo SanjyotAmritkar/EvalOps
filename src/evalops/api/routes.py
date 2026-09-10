@@ -26,6 +26,7 @@ from evalops.api.schemas import (
     JudgeCalibrationRead,
     ProjectCreate,
     ProjectRead,
+    RegressionDiagnosticsRead,
     ReleasePolicyCreate,
     ReleasePolicyRead,
     RunRequest,
@@ -49,11 +50,13 @@ from evalops.db import (
     ReleasePolicyRepository,
     SystemVersionRepository,
 )
+from evalops.diagnostics import diagnose_regressions
 from evalops.evaluators import build_evaluators
 from evalops.execution_service import execute_experiment
 from evalops.gate import evaluate_gate
 from evalops.judge import LLMJudge
 from evalops.promotion import promote_traces_to_dataset
+from evalops.runner import RunOutcome
 from evalops.worker.tasks import DispatchError, enqueue_experiment_run
 
 _T = TypeVar("_T")
@@ -346,6 +349,32 @@ def list_experiment_results(experiment_id: str, session: SessionDep) -> list[Eva
         EvaluationResultRead.of(result, evaluate_gate(result, policy))
         for result in EvaluationResultRepository(session).list_for_experiment(experiment_id)
     ]
+
+
+@experiments.get("/experiments/{experiment_id}/diagnostics")
+def get_experiment_diagnostics(
+    experiment_id: str, session: SessionDep
+) -> RegressionDiagnosticsRead:
+    """Deterministic, explanatory-only case-level regression diagnostics.
+
+    Computed from the persisted runs / case results by :func:`diagnose_regressions`
+    -- it never changes the release decision, the metrics, or the statistical
+    evidence (those come from the run path and ``GET /results``). Additive and
+    experiment-scoped. ``available`` is ``False`` before the first run.
+    """
+    experiment = _found(ExperimentRepository(session).get(experiment_id), "experiment not found")
+
+    run_repo = EvaluationRunRepository(session)
+    runs = run_repo.list_for_experiment(experiment_id)
+    case_results = [
+        cr for run in runs if (cr := run_repo.get_case_result_for_run(run.id)) is not None
+    ]
+    outcome = RunOutcome(runs=tuple(runs), case_results=tuple(case_results))
+    diagnostics = diagnose_regressions(experiment, outcome)
+
+    results = EvaluationResultRepository(session).list_for_experiment(experiment_id)
+    latest_result_id = results[-1].id if results else None
+    return RegressionDiagnosticsRead.of(diagnostics, evaluation_result_id=latest_result_id)
 
 
 # --- LLM-judge calibration (Phase 6, CP 6.2) --------------------

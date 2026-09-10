@@ -526,6 +526,63 @@ experiment result/evidence views (that is CP 10.2).
   `aria-live="polite"`) for resource-created confirmations only; persistent
   state (PASS/BLOCK, job progress) and field validation stay inline.
 
+### 7.8 Implemented: experiment results + regression diagnostics (Phase 10, CP 10.2)
+
+The experiment page becomes decision-first, and a new **explanatory-only**
+diagnostic layer answers "which cases regressed, and why" without touching the
+gate.
+
+* **Result surface** — a comparison header (`baseline → candidate`, dataset +
+  case count, release-policy status; IDs / providers / config behind "Technical
+  details"); a dominant `DecisionHero` with four backend-derived states — clean
+  **PASS** ("Ready to release"), **BLOCK** ("Release blocked" + the count and
+  the gate's own blocking sentences), **passed with unverified concerns** (the
+  existing weak/inconclusive advisories, visually distinct from a clean PASS),
+  and **comparison only** (ungated, with a path to Release Policies); a grouped
+  `MetricComparison` (Quality / Reliability / Performance / Other, from the
+  metric-id shape so unknown metrics still group) that keeps every metric, leads
+  with the human label, and draws a baseline-vs-candidate bar **only** for
+  `[0,1]`-normalised metrics (latency / cost show a delta, never a bar); Phase 5
+  paired-bootstrap evidence moved behind progressive disclosure
+  (`StatisticalEvidence`: status + paired-N first, the CI / delta / summaries one
+  level down, the bootstrap method one further). No gate outcome, CI, or verdict
+  is computed in the browser.
+
+* **Deterministic regression diagnostics** (`evalops.diagnostics`,
+  `GET /experiments/{id}/diagnostics`, `RegressionDiagnosticsRead`). Additive and
+  experiment-scoped — no migration, no new execution path, no new experiment
+  type. Computed from the already-persisted `EvaluationRun` / `CaseResult`
+  records *after* the gate: baseline and candidate runs are paired by
+  `(case_id, repeat_index)` (the same rule `evalops.stats` uses), and each pair
+  yields zero or more findings, each in a category derived **mechanically** from
+  the evidence:
+
+  | Signal | Category |
+  |---|---|
+  | candidate run errored, baseline did not | `provider_execution_failure` |
+  | evaluator `passed` went `True → False` | by evaluator name (below) |
+  | graded `EvaluatorScore.score` dropped ≥ `MIN_SCORE_DROP` (0.05) | by evaluator name |
+
+  Evaluator name → category: `retrieval_recall` / `context_precision` →
+  `retrieval_regression`; `groundedness*` → `groundedness_regression`;
+  `tool_selection` / `tool_arguments` / `tool_success` / `tool_trajectory` →
+  the matching `tool_*` / `trajectory_regression`; **anything else →
+  `evaluator_regression`** (the generic fallback for custom-named and future
+  evaluators). The response carries totals (`matched_pairs`, `regressing_pairs`,
+  `regressing_cases`), counts by category and by evaluator, and one
+  `RegressingCase` per affected case with a representative `(baseline_run_id,
+  candidate_run_id)` pair the dashboard resolves against `GET /runs` to render a
+  side-by-side inspection (reusing the CP 9.3 `RunEvidence`), highlighting
+  `PASS → FAIL` / score-drop transitions.
+
+  **Diagnostics never determine or alter a release decision, never add a gate,
+  and never run a second statistical engine.** `MIN_SCORE_DROP` is a
+  reporting threshold for the case view only; the gate is unchanged and still
+  decides purely from the aggregate metrics and their paired-bootstrap evidence
+  (`MIN_PAIRS_TO_BLOCK`, thresholds, and CP 5.2 semantics untouched). The
+  computation is pure, deterministic, and independently tested
+  (`tests/test_diagnostics.py`, `tests/test_api_diagnostics.py`).
+
 ---
 
 ## 8. Statistical Rigor

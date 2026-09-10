@@ -77,6 +77,20 @@ const GLOSSARY: GlossaryEntry[] = [
       "Increase repeats or dataset size for a conclusive result. EvalOps never blocks on a breach it cannot confirm.",
   },
   {
+    term: "Statistical evidence",
+    plain:
+      "For each metric, EvalOps pairs every baseline run with the candidate run for the same case and repeat, then computes a 95% confidence interval for the change with a deterministic paired bootstrap.",
+    detail:
+      "The interval — not the raw average — decides whether a threshold breach is real enough to BLOCK. All of it is backend-computed; the dashboard only formats it.",
+  },
+  {
+    term: "Regressing case",
+    plain:
+      "A single dataset case where the candidate did worse than the baseline: an evaluator went from pass to fail, a graded score dropped, or the candidate hit a provider or tool error the baseline did not.",
+    detail:
+      "Diagnostics group regressing cases by category to explain a BLOCK. They are descriptive only — they never change the PASS/BLOCK decision.",
+  },
+  {
     term: "Production traces",
     plain:
       "Real interactions captured from a running system. You can promote a selection of them into a replay dataset.",

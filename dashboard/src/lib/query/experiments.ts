@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   createExperiment,
   getExperiment,
+  getExperimentDiagnostics,
   getJob,
   listExperimentResults,
   listExperimentRuns,
@@ -55,6 +56,19 @@ export function useExperimentResults(experimentId: string) {
   });
 }
 
+/**
+ * Case-level regression diagnostics for a completed experiment. Explanatory
+ * only — it never carries a PASS/BLOCK decision. Invalidated on the same first
+ * terminal job read as the runs / results queries.
+ */
+export function useExperimentDiagnostics(experimentId: string) {
+  return useQuery({
+    queryKey: queryKeys.experiments.diagnostics(experimentId),
+    queryFn: () => getExperimentDiagnostics(experimentId),
+    enabled: experimentId.length > 0,
+  });
+}
+
 export function useCreateExperiment(projectId: string) {
   const queryClient = useQueryClient();
   return useMutation<Experiment, Error, ExperimentCreate>({
@@ -78,6 +92,9 @@ export function useRunExperiment(experimentId: string) {
       });
       void queryClient.invalidateQueries({
         queryKey: queryKeys.experiments.results(experimentId),
+      });
+      void queryClient.invalidateQueries({
+        queryKey: queryKeys.experiments.diagnostics(experimentId),
       });
     },
   });
@@ -114,6 +131,9 @@ export function useJob(experimentId: string, jobId: string | null) {
         });
         void queryClient.invalidateQueries({
           queryKey: queryKeys.experiments.results(experimentId),
+        });
+        void queryClient.invalidateQueries({
+          queryKey: queryKeys.experiments.diagnostics(experimentId),
         });
       }
       return job;

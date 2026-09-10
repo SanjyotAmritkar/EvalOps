@@ -31,6 +31,7 @@ export const queryKeys = {
     detail: (id: string) => ["experiments", id] as const,
     runs: (id: string) => ["experiments", id, "runs"] as const,
     results: (id: string) => ["experiments", id, "results"] as const,
+    diagnostics: (id: string) => ["experiments", id, "diagnostics"] as const,
   },
   jobs: {
     detail: (id: string) => ["jobs", id] as const,

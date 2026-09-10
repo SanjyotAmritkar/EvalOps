@@ -5,6 +5,7 @@ import type {
   EvaluationRun,
   Experiment,
   ExperimentCreate,
+  RegressionDiagnostics,
   RunRequest,
   RunResponse,
 } from "./types";
@@ -68,4 +69,16 @@ export function listExperimentResults(
   experimentId: string,
 ): Promise<EvaluationResult[]> {
   return apiFetch<EvaluationResult[]>(`/experiments/${experimentId}/results`);
+}
+
+/**
+ * Deterministic, explanatory-only case-level regression diagnostics. Never a
+ * decision — the release outcome comes from {@link listExperimentResults}.
+ */
+export function getExperimentDiagnostics(
+  experimentId: string,
+): Promise<RegressionDiagnostics> {
+  return apiFetch<RegressionDiagnostics>(
+    `/experiments/${experimentId}/diagnostics`,
+  );
 }

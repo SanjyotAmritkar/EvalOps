@@ -179,7 +179,24 @@ interface StubOptions {
   results?: unknown[];
   /** Results returned once a terminal job has been polled (simulates persistence). */
   resultsWhenDone?: unknown[];
+  /** Body for GET /experiments/e1/diagnostics. Default: an unavailable stub. */
+  diagnostics?: unknown;
 }
+
+const EMPTY_DIAGNOSTICS = {
+  experiment_id: "e1",
+  evaluation_result_id: null,
+  baseline_version_id: "v1",
+  candidate_version_id: "v2",
+  matched_pairs: 0,
+  regressing_pairs: 0,
+  regressing_cases: 0,
+  available: false,
+  categories: [],
+  evaluators: [],
+  cases: [],
+  findings: [],
+};
 
 function stubApi(opts: StubOptions = {}) {
   const {
@@ -189,6 +206,7 @@ function stubApi(opts: StubOptions = {}) {
     runs = [],
     results = [],
     resultsWhenDone,
+    diagnostics = EMPTY_DIAGNOSTICS,
   } = opts;
 
   let jobPolls = 0;
@@ -208,6 +226,8 @@ function stubApi(opts: StubOptions = {}) {
       if (stage === "completed" || stage === "failed") reachedTerminal = true;
       return jsonResponse(makeJob(stage), 200);
     }
+    if (url.endsWith("/api/experiments/e1/diagnostics"))
+      return jsonResponse(diagnostics);
     if (url.endsWith("/api/experiments/e1")) return jsonResponse(EXPERIMENT);
     if (url.endsWith("/api/experiments/e1/runs")) return jsonResponse(runs);
     if (url.endsWith("/api/experiments/e1/results")) {
@@ -468,8 +488,11 @@ describe("ExperimentDetailPage", () => {
       screen.getByText("Answer quality regressed 50%; policy allows up to 10%."),
     ).toBeInTheDocument();
     expect(screen.getByText("Blocked")).toBeInTheDocument();
-    // CP 5.3: persisted evidence renders on the recomputed-from-storage path
-    expect(screen.getByText(/Statistical evidence/i)).toBeInTheDocument();
+    // CP 5.3 / CP 10.2: persisted evidence renders on the recomputed-from-storage
+    // path, now under its own progressively-disclosed section
+    expect(
+      screen.getByRole("heading", { name: /statistical evidence/i }),
+    ).toBeInTheDocument();
     expect(screen.getByText(/8 paired samples/)).toBeInTheDocument();
     expect(screen.getByText("CI supports a regression")).toBeInTheDocument();
   });

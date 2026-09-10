@@ -216,6 +216,23 @@ a feature is listed under **SHIPPED** only if its full path actually works today
   lightweight accessible toast for resource-created feedback. Raw project UUIDs
   move into a low-emphasis "Project details" disclosure. No backend, API, or
   evaluation-semantics change; experiment result/evidence visuals are CP 10.2.
+- **Experiment results + regression diagnostics** (Phase 10, CP 10.2) — the
+  experiment page is now a decision-first surface: a comparison header
+  (baseline → candidate, dataset, policy status, IDs behind "Technical
+  details"), a dominant release-decision hero with four distinct states
+  (PASS / BLOCK / passed-with-unverified-concerns / comparison-only), a grouped
+  metric comparison (Quality / Reliability / Performance) with baseline-vs-
+  candidate bars for [0,1] metrics only, and Phase 5 statistical evidence behind
+  progressive disclosure. A new **deterministic regression-diagnostics** layer
+  (`GET /experiments/{id}/diagnostics`, computed from persisted runs by
+  `evalops.diagnostics`) explains a BLOCK at the case level — regressing pairs
+  grouped into defensible categories (evaluator regression, provider/execution
+  failure, retrieval / tool-selection / tool-argument / tool-execution /
+  trajectory regression) with affected case ids and a representative pair for
+  side-by-side inspection. **Diagnostics are explanatory only: they never change
+  a PASS/BLOCK decision, add a gate, or run a second statistical engine.** No
+  change to statistical thresholds, `MIN_PAIRS_TO_BLOCK`, release-policy
+  semantics, or the async execution path.
 
 ### NOT YET SHIPPED
 

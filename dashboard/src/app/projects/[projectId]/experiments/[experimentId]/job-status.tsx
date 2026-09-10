@@ -5,8 +5,13 @@ import { CopyButton } from "@/components/ui/copy-button";
 import { apiErrorMessage } from "@/lib/api/errors";
 import type { AsyncJobStatus } from "@/lib/api/types";
 import { cn } from "@/lib/cn";
-import { useExperimentResults, useJob } from "@/lib/query/experiments";
-import { ReleaseDecision } from "./release-decision";
+import {
+  useExperimentDiagnostics,
+  useExperimentResults,
+  useExperimentRuns,
+  useJob,
+} from "@/lib/query/experiments";
+import { ResultPanel } from "./result-panel";
 
 type Tone = "pending" | "active" | "done" | "error";
 
@@ -65,7 +70,7 @@ function Lifecycle({ status }: { status: AsyncJobStatus }) {
  * The live view of a background run the dashboard just enqueued. It polls the
  * PostgreSQL-backed job (via {@link useJob}) and shows a compact lifecycle:
  * Queued / Running / Completed / Failed. A gated BLOCK arrives here as a
- * *completed* run and is rendered by <ReleaseDecision>, never as a failure.
+ * *completed* run and is rendered by <ResultPanel>, never as a failure.
  */
 export function JobStatus({
   experimentId,
@@ -78,6 +83,8 @@ export function JobStatus({
 }) {
   const job = useJob(experimentId, jobId);
   const results = useExperimentResults(experimentId);
+  const runs = useExperimentRuns(experimentId);
+  const diagnostics = useExperimentDiagnostics(experimentId);
 
   if (job.isPending) {
     return (
@@ -133,14 +140,10 @@ export function JobStatus({
       <div className="flex flex-col gap-4">
         <Lifecycle status="completed" />
         {result ? (
-          <ReleaseDecision
-            decision={result.decision}
-            gated={result.gated}
-            reasons={result.reasons}
-            metrics={result.metrics}
-            resultId={result.id}
-            advisories={result.advisories}
-            evidence={result.evidence}
+          <ResultPanel
+            result={result}
+            diagnostics={diagnostics.data}
+            runs={runs.data ?? []}
           />
         ) : results.isFetching ? (
           <p className="text-sm text-fg-subtle">Loading the stored result…</p>

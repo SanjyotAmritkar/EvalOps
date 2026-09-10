@@ -13,6 +13,7 @@ from typing import Annotated, Any, Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 from evalops import domain
+from evalops.diagnostics import RegressionDiagnostics
 from evalops.domain.enums import (
     CaseOrigin,
     EvaluatorFamily,
@@ -618,6 +619,143 @@ class EvaluationResultRead(BaseModel):
             ],
             advisories=list(gate.advisories),
             evidence=[MetricEvidenceRead.of(e) for e in value.evidence],
+        )
+
+
+# --- regression diagnostics (Phase 10, CP 10.2) --------------------
+
+
+class DiagnosticCategoryRead(BaseModel):
+    """Regressing-pair / distinct-case counts for one category."""
+
+    category: str
+    pairs: int
+    cases: int
+
+
+class DiagnosticEvaluatorRead(BaseModel):
+    """Per-evaluator breakdown of the evaluator-derived findings."""
+
+    evaluator: str
+    pairs: int
+    cases: int
+    pass_to_fail: int
+    score_drop: int
+
+
+class DiagnosticPairRefRead(BaseModel):
+    """A pointer to one baseline/candidate run pair for case inspection. The two
+    run ids resolve against ``GET /experiments/{id}/runs``."""
+
+    repeat_index: int
+    baseline_run_id: str
+    candidate_run_id: str
+
+
+class RegressingCaseRead(BaseModel):
+    case_id: str
+    categories: list[str]
+    evaluators: list[str]
+    provider_failure: bool
+    finding_count: int
+    representative: DiagnosticPairRefRead
+
+
+class DiagnosticFindingRead(BaseModel):
+    """One candidate-side regression on one ``(case_id, repeat_index)`` pair."""
+
+    case_id: str
+    repeat_index: int
+    baseline_run_id: str
+    candidate_run_id: str
+    category: str
+    kind: str
+    evaluator: str | None
+    baseline_detail: str
+    candidate_detail: str
+
+
+class RegressionDiagnosticsRead(BaseModel):
+    """Deterministic, explanatory-only case-level regression diagnostics for one
+    experiment (CP 10.2).
+
+    Computed from the persisted runs / case results *after* the gate; it never
+    changes the release decision, the metrics, or the statistical evidence.
+    ``available`` is ``False`` before the experiment has been run.
+    """
+
+    experiment_id: str
+    evaluation_result_id: str | None
+    baseline_version_id: str
+    candidate_version_id: str
+    matched_pairs: int
+    regressing_pairs: int
+    regressing_cases: int
+    available: bool
+    categories: list[DiagnosticCategoryRead]
+    evaluators: list[DiagnosticEvaluatorRead]
+    cases: list[RegressingCaseRead]
+    findings: list[DiagnosticFindingRead]
+
+    @classmethod
+    def of(
+        cls,
+        value: RegressionDiagnostics,
+        *,
+        evaluation_result_id: str | None,
+    ) -> RegressionDiagnosticsRead:
+        return cls(
+            experiment_id=value.experiment_id,
+            evaluation_result_id=evaluation_result_id,
+            baseline_version_id=value.baseline_version_id,
+            candidate_version_id=value.candidate_version_id,
+            matched_pairs=value.matched_pairs,
+            regressing_pairs=value.regressing_pairs,
+            regressing_cases=value.regressing_cases,
+            available=value.available,
+            categories=[
+                DiagnosticCategoryRead(category=c.category, pairs=c.pairs, cases=c.cases)
+                for c in value.categories
+            ],
+            evaluators=[
+                DiagnosticEvaluatorRead(
+                    evaluator=e.evaluator,
+                    pairs=e.pairs,
+                    cases=e.cases,
+                    pass_to_fail=e.pass_to_fail,
+                    score_drop=e.score_drop,
+                )
+                for e in value.evaluators
+            ],
+            cases=[
+                RegressingCaseRead(
+                    case_id=rc.case_id,
+                    categories=list(rc.categories),
+                    evaluators=list(rc.evaluators),
+                    provider_failure=rc.provider_failure,
+                    finding_count=rc.finding_count,
+                    representative=DiagnosticPairRefRead(
+                        repeat_index=rc.representative.repeat_index,
+                        baseline_run_id=rc.representative.baseline_run_id,
+                        candidate_run_id=rc.representative.candidate_run_id,
+                    ),
+                )
+                for rc in value.cases
+            ],
+            findings=[
+                DiagnosticFindingRead(
+                    case_id=f.case_id,
+                    repeat_index=f.repeat_index,
+                    baseline_run_id=f.baseline_run_id,
+                    candidate_run_id=f.candidate_run_id,
+                    category=f.category,
+                    kind=f.kind,
+                    evaluator=f.evaluator,
+                    baseline_detail=f.baseline_detail,
+                    candidate_detail=f.candidate_detail,
+                )
+                for f in value.findings
+            ],
         )
 
 
