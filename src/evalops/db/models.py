@@ -116,6 +116,11 @@ class DatasetCase(Base):
     #: RAG ground truth (Phase 9): relevant document/chunk ids for this case, as
     #: a JSON string list. Empty for every non-RAG case.
     expected_retrieval_ids: Mapped[list[str]] = mapped_column(JSONMap, nullable=False, default=list)
+    #: Agent ground truth (CP 9.2): ordered JSON list of
+    #: ``{name, arguments|null}`` expected tool calls. Empty for every non-agent case.
+    expected_tool_calls: Mapped[list[dict[str, Any]]] = mapped_column(
+        JSONMap, nullable=False, default=list
+    )
     origin: Mapped[CaseOrigin] = mapped_column(
         _enum(CaseOrigin, "case_origin"), nullable=False, default=CaseOrigin.AUTHORED
     )
@@ -215,6 +220,9 @@ class EvaluationRun(Base):
     #: ``{doc_id, content, rank, score}`` objects the external system reported.
     #: Empty for every text-only run.
     retrieval: Mapped[list[dict[str, Any]]] = mapped_column(JSONMap, nullable=False, default=list)
+    #: Agent tool-call evidence (CP 9.2): ordered JSON list of
+    #: ``{name, arguments, result, ok, error}`` objects. Empty for every non-agent run.
+    tool_calls: Mapped[list[dict[str, Any]]] = mapped_column(JSONMap, nullable=False, default=list)
     prompt_tokens: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     completion_tokens: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     cost_usd: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)

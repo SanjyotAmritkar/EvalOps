@@ -311,6 +311,7 @@ def test_run_response_carries_statistical_evidence_that_survives_refresh(
     assert set(ev_by_metric) == {
         "success_rate",
         "contains.pass_rate",
+        "contains.mean_score",  # CP 9.2: generic graded-score metric
         "latency_ms.mean",
         "cost_usd.mean",
     }

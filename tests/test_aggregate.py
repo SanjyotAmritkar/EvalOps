@@ -48,6 +48,15 @@ def _score(name: str, *, passed: bool) -> EvaluatorScore:
     )
 
 
+def _graded(name: str, value: float) -> EvaluatorScore:
+    return EvaluatorScore(
+        evaluator=name,
+        family=EvaluatorFamily.STATISTICAL,
+        score=value,
+        passed=value >= 0.5,
+    )
+
+
 def _outcome(*pairs: tuple[EvaluationRun, tuple[EvaluatorScore, ...]]) -> RunOutcome:
     runs = tuple(run for run, _ in pairs)
     results = tuple(CaseResult(run_id=run.id, scores=scores) for run, scores in pairs)
@@ -196,11 +205,41 @@ def test_result_is_an_evaluation_result_with_unique_metrics() -> None:
     assert names == [
         "success_rate",
         "a.pass_rate",
+        "a.mean_score",  # CP 9.2: generic graded-score metric, per evaluator
         "latency_ms.mean",
         "latency_ms.p95",
         "cost_usd.total",
     ]
     assert len(names) == len(set(names))
+
+
+def test_mean_score_is_the_mean_of_evaluator_scores_generically() -> None:
+    # CP 9.2: a graded regression that stays above the 0.5 pass threshold --
+    # pass_rate is unchanged, mean_score shows the drop.
+    outcome = _outcome(
+        (_run("base"), (_graded("g", 1.0),)),
+        (_run("base"), (_graded("g", 1.0),)),
+        (_run("cand"), (_graded("g", 0.8),)),
+        (_run("cand"), (_graded("g", 0.6),)),
+    )
+    result = _aggregate(outcome, ["g"])
+
+    assert _metric(result, "g.pass_rate").baseline_value == 1.0
+    assert _metric(result, "g.pass_rate").candidate_value == 1.0  # both >= 0.5
+    assert _metric(result, "g.mean_score").baseline_value == 1.0
+    assert _metric(result, "g.mean_score").candidate_value == pytest.approx(0.7)
+
+
+def test_mean_score_counts_failed_runs_as_zero_in_the_denominator() -> None:
+    outcome = _outcome(
+        (_run("base"), (_graded("g", 1.0),)),
+        (_run("base", error="boom"), ()),
+        (_run("cand"), (_graded("g", 1.0),)),
+        (_run("cand"), (_graded("g", 1.0),)),
+    )
+    result = _aggregate(outcome, ["g"])
+    assert _metric(result, "g.mean_score").baseline_value == pytest.approx(0.5)  # 1.0 / 2 runs
+    assert _metric(result, "g.mean_score").candidate_value == 1.0
 
 
 def test_length_misalignment_is_rejected() -> None:

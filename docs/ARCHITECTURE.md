@@ -392,6 +392,66 @@ expose them through the existing run / dataset representations; no new
 endpoints. `GET /results` recompute is unchanged — retrieval evidence is not
 needed to reconstruct an `EvaluationResult`.
 
+### 7.5 Implemented: agent / tool evaluation foundation (Phase 9, CP 9.2)
+
+**EvalOps observes and evaluates tool behaviour; it does not execute arbitrary
+external tools, plan, or judge semantic task correctness.** No agent framework,
+no LangGraph/LangChain, no MCP, no memory.
+
+```
+External agent system
+  -> provider execution result
+       -> final output        (ProviderResponse.text)
+       -> retrieval evidence  (optional, CP 9.1)
+       -> tool-call evidence  (ProviderResponse.tool_calls: tuple[ToolCall])
+  -> existing Eval Runner  (threads tool_calls onto EvaluationRun.tool_calls)
+       -> agent evaluators  (ordinary Evaluator implementations)
+  -> generic metric aggregation  (<name>.pass_rate AND <name>.mean_score)
+  -> paired-bootstrap statistical evidence -> existing release policy -> PASS/BLOCK
+```
+
+**Tool-call evidence.** `ToolCall(name, arguments: Mapping, result: Any = None,
+ok: bool = True, error: str | None = None)` — framework-neutral; tuple order is
+the trajectory. `ProviderResponse.tool_calls` / `EvaluationRun.tool_calls`
+default to `()`, so text-only and RAG-only executions are byte-identical to
+before. `MockProvider` reports deterministic evidence from
+`parameters['mock']['tool_calls']` (prompt → call list) / `tool_calls_default`.
+EvalOps never executes a tool — `result` is whatever the external system
+supplies.
+
+**Ground truth.** `DatasetCase.expected_tool_calls: tuple[ExpectedToolCall,
+...]` (default `()`), an *ordered* list of `ExpectedToolCall(name,
+arguments: Mapping | None)`. `arguments is None` means "only the name is
+expected here". Empty for every non-agent case and every promoted-trace case.
+
+**Evaluators** (all `DETERMINISTIC`; each emits an ordinary `EvaluatorScore`):
+
+| type | metric | key semantics | default pass |
+|---|---|---|---|
+| `tool_selection` | Jaccard of expected vs observed tool-name **sets** | order- and duplicate-independent; missing *and* extra tools lower it; no observed calls → `0.0`; no labels → `ConfigError` | `>= 1.0` |
+| `tool_arguments` | fraction of arg-labelled expectations whose observed call matches **structurally** | canonical (key-order-independent, nested-aware) equality — missing/extra keys or a changed value fail; positional pairing for repeated tool names; **not** semantic equivalence; no arg labels → `ConfigError` | `>= 1.0` |
+| `tool_success` | `successful observed calls / observed calls` | needs no labels; **zero observed calls → `1.0`** (no failure observed) | `>= 1.0` |
+| `tool_trajectory` | sequence Dice: `2·LCS(expected, observed) / (len+len)` over the name sequences | **exact ordered adherence, not agent/task correctness**; sensitive to valid alternative orderings; no observed calls → `0.0`; no labels → `ConfigError` | `>= 1.0` |
+
+**Generic `<evaluator>.mean_score` aggregation.** Revisiting the CP 9.1
+limitation: `aggregate_results` now emits `<name>.mean_score` (the mean of
+`EvaluatorScore.score`, failed runs contributing `0.0`) alongside
+`<name>.pass_rate` **for every evaluator, not just RAG/agent**.
+`build_statistical_evidence` produces continuous paired-bootstrap evidence for
+it through the same path; `gate._direction` maps `.mean_score` to
+higher-is-better; `expected_metric_names` yields it, so a `ReleasePolicy` can
+threshold it with **no** RAG/agent-specific gate logic. This makes a graded
+regression that stays above an evaluator's pass threshold (retrieval recall
+1.0 → 0.9, tool selection 1.0 → 0.8) visible to the gate. `pass_rate` metrics
+are unchanged. The additive metric is documented in §8.1 and the CP reports.
+
+**Persistence / API (additive, one narrow migration `c09d84567ccc`).**
+`evaluation_run.tool_calls` and `dataset_case.expected_tool_calls` are JSON
+columns, `NOT NULL DEFAULT '[]'`. `EvaluationRunRead.tool_calls` and
+`DatasetCaseRead.expected_tool_calls` expose them through the existing run /
+dataset representations; no new endpoints; `GET /runs` faithfully reconstructs
+an agent execution after a refresh.
+
 ---
 
 ## 8. Statistical Rigor
@@ -422,10 +482,23 @@ repeat_index)`; only keys present on *both* sides are used ("comparable pairs"),
 ordered by that key so the result is deterministic. Provider-failure handling is
 per metric: `success_rate` and `<evaluator>.pass_rate` are per-run binary
 indicators where a failed run contributes `0.0` (same denominator rule
-aggregation uses); `latency_ms.mean` drops any pair where either side errored (a
-failed run has no meaningful latency, and the drop count is recorded);
-`cost_usd.mean` keeps every pair (a failed call genuinely costs ~0). Unmatched
-runs (a key on only one side — corrupt/partial data) are counted and excluded.
+aggregation uses); `<evaluator>.mean_score` (CP 9.2) is the per-run
+`EvaluatorScore.score`, continuous in [0, 1], `0.0` on a failed run, every
+comparable pair contributing; `latency_ms.mean` drops any pair where either
+side errored (a failed run has no meaningful latency, and the drop count is
+recorded); `cost_usd.mean` keeps every pair (a failed call genuinely costs ~0).
+Unmatched runs (a key on only one side — corrupt/partial data) are counted and
+excluded.
+
+**Additive metric `<evaluator>.mean_score` (CP 9.2).** `aggregate_results`
+emits it for *every* evaluator alongside `<evaluator>.pass_rate` — the plain
+arithmetic mean of `EvaluatorScore.score` (higher-is-better; failed runs count
+as `0.0`). It exists so a *graded* regression that never crosses an evaluator's
+own pass/fail threshold (retrieval recall 1.0 → 0.9, tool selection 1.0 → 0.8)
+is still visible to a `ReleasePolicy`. It flows through the existing paired
+bootstrap and gate with no new machinery: `_direction` treats `.mean_score`
+as higher-is-better and nothing else changed. `pass_rate` metrics keep their
+exact meaning.
 
 **Statistic.** For each metric the estimator is the paired delta of means,
 `mean(candidate_i − baseline_i)`. The CI is a **percentile bootstrap**: resample

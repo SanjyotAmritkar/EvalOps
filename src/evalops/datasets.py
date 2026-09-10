@@ -6,6 +6,8 @@ One JSON object per non-blank line. Recognised keys:
 - ``expected_output`` -- optional string
 - ``expected_retrieval_ids`` -- optional list of non-empty strings (RAG ground
   truth: the relevant document/chunk ids for this case)
+- ``expected_tool_calls`` -- optional ordered list of ``{"name": str,
+  "arguments"?: object}`` (agent ground truth: the expected tool trajectory)
 - ``id`` -- optional non-empty string, unique across the file; generated when absent
 
 Every malformed, empty, or duplicate-id input raises :class:`ConfigError` with
@@ -21,9 +23,16 @@ from typing import Any
 from evalops.domain.entities import Dataset, DatasetCase
 from evalops.domain.enums import CaseOrigin
 from evalops.domain.ids import new_id
+from evalops.domain.value_objects import ExpectedToolCall
 from evalops.errors import ConfigError
 
-_ALLOWED_KEYS = {"input", "expected_output", "expected_retrieval_ids", "id"}
+_ALLOWED_KEYS = {
+    "input",
+    "expected_output",
+    "expected_retrieval_ids",
+    "expected_tool_calls",
+    "id",
+}
 
 
 def load_jsonl(path: str | Path, *, project_id: str, name: str | None = None) -> Dataset:
@@ -84,6 +93,8 @@ def _parse_line(line: str, lineno: int, file_path: Path, first_seen: dict[str, i
             f"{where}: 'expected_retrieval_ids' must be a list of non-empty strings when present"
         )
 
+    expected_tool_calls = _parse_expected_tool_calls(obj.get("expected_tool_calls", []), where)
+
     case_id = obj.get("id")
     if case_id is not None:
         if not isinstance(case_id, str) or not case_id.strip():
@@ -98,6 +109,29 @@ def _parse_line(line: str, lineno: int, file_path: Path, first_seen: dict[str, i
         input=raw_input,
         expected_output=expected,
         expected_retrieval_ids=tuple(raw_ids),
+        expected_tool_calls=expected_tool_calls,
         origin=CaseOrigin.AUTHORED,
         id=case_id if isinstance(case_id, str) else new_id(),
     )
+
+
+def _parse_expected_tool_calls(raw: Any, where: str) -> tuple[ExpectedToolCall, ...]:
+    if not isinstance(raw, list):
+        raise ConfigError(f"{where}: 'expected_tool_calls' must be a list when present")
+    calls: list[ExpectedToolCall] = []
+    for i, entry in enumerate(raw):
+        if not isinstance(entry, dict) or set(entry) - {"name", "arguments"}:
+            raise ConfigError(
+                f"{where}: expected_tool_calls[{i}] must be an object with 'name' "
+                "and optional 'arguments'"
+            )
+        name = entry.get("name")
+        if not isinstance(name, str) or not name.strip():
+            raise ConfigError(f"{where}: expected_tool_calls[{i}].name must be a non-empty string")
+        arguments = entry.get("arguments")
+        if arguments is not None and not isinstance(arguments, dict):
+            raise ConfigError(
+                f"{where}: expected_tool_calls[{i}].arguments must be an object when present"
+            )
+        calls.append(ExpectedToolCall(name=name, arguments=arguments))
+    return tuple(calls)

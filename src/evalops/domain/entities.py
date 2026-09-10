@@ -19,11 +19,13 @@ from evalops.domain.errors import DomainValidationError
 from evalops.domain.ids import new_id
 from evalops.domain.value_objects import (
     EvaluatorScore,
+    ExpectedToolCall,
     JudgeCalibrationCase,
     JudgeCalibrationMetrics,
     MetricComparison,
     MetricEvidence,
     RetrievedItem,
+    ToolCall,
     UsageMetrics,
 )
 
@@ -118,8 +120,10 @@ class DatasetCase:
     """A single evaluation case: an input and, optionally, a reference output.
 
     ``expected_retrieval_ids`` (Phase 9) is the ground-truth set of relevant
-    document/chunk ids for RAG retrieval evaluators. Empty for every non-RAG
-    case, so existing datasets and promoted-trace datasets stay valid.
+    document/chunk ids for RAG retrieval evaluators. ``expected_tool_calls``
+    (Phase 9, CP 9.2) is the authored expected agent trajectory -- an ordered
+    tuple of :class:`ExpectedToolCall`. Both are empty for every non-RAG /
+    non-agent case, so existing datasets and promoted-trace datasets stay valid.
     """
 
     input: str
@@ -127,16 +131,23 @@ class DatasetCase:
     origin: CaseOrigin = CaseOrigin.AUTHORED
     source_trace_id: str | None = None
     expected_retrieval_ids: tuple[str, ...] = ()
+    expected_tool_calls: tuple[ExpectedToolCall, ...] = ()
     id: str = field(default_factory=new_id)
 
     def __post_init__(self) -> None:
         _require_non_empty(self.input, "DatasetCase.input")
         _require_non_empty(self.id, "DatasetCase.id")
         object.__setattr__(self, "expected_retrieval_ids", tuple(self.expected_retrieval_ids))
+        object.__setattr__(self, "expected_tool_calls", tuple(self.expected_tool_calls))
         for relevant_id in self.expected_retrieval_ids:
             if not isinstance(relevant_id, str) or not relevant_id.strip():
                 raise DomainValidationError(
                     "DatasetCase.expected_retrieval_ids entries must be non-empty strings"
+                )
+        for expected in self.expected_tool_calls:
+            if not isinstance(expected, ExpectedToolCall):
+                raise DomainValidationError(
+                    "DatasetCase.expected_tool_calls entries must be ExpectedToolCall"
                 )
         has_trace = bool(self.source_trace_id and self.source_trace_id.strip())
         if self.origin is CaseOrigin.PROMOTED_TRACE and not has_trace:
@@ -219,7 +230,9 @@ class EvaluationRun:
 
     ``retrieval`` (Phase 9) is the retrieval evidence an external RAG system
     reported for this execution -- zero or more :class:`RetrievedItem`,
-    provider/framework-neutral. Empty for every text-only run.
+    provider/framework-neutral. ``tool_calls`` (CP 9.2) is the tool-call
+    trajectory an external agent reported -- zero or more :class:`ToolCall`, in
+    order. Both empty for every text-only run.
     """
 
     experiment_id: str
@@ -230,6 +243,7 @@ class EvaluationRun:
     usage: UsageMetrics = field(default_factory=UsageMetrics)
     error: str | None = None
     retrieval: tuple[RetrievedItem, ...] = ()
+    tool_calls: tuple[ToolCall, ...] = ()
     id: str = field(default_factory=new_id)
     created_at: datetime = field(default_factory=utcnow)
 
@@ -248,6 +262,7 @@ class EvaluationRun:
         if self.error is not None and not self.error.strip():
             raise DomainValidationError("EvaluationRun.error must be non-blank when set")
         object.__setattr__(self, "retrieval", tuple(self.retrieval))
+        object.__setattr__(self, "tool_calls", tuple(self.tool_calls))
         _require_aware(self.created_at, "EvaluationRun.created_at")
 
 

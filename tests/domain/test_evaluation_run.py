@@ -82,3 +82,13 @@ def test_retrieval_defaults_empty_and_normalises_to_tuple() -> None:
     run = EvaluationRun(**VALID_KWARGS, retrieval=items)  # type: ignore[arg-type]
     assert run.retrieval == tuple(items)
     assert isinstance(run.retrieval, tuple)
+
+
+def test_tool_calls_default_empty_and_normalise_to_tuple() -> None:
+    from evalops.domain.value_objects import ToolCall
+
+    assert EvaluationRun(**VALID_KWARGS).tool_calls == ()
+    calls = [ToolCall(name="search")]
+    run = EvaluationRun(**VALID_KWARGS, tool_calls=calls)  # type: ignore[arg-type]
+    assert run.tool_calls == tuple(calls)
+    assert isinstance(run.tool_calls, tuple)

@@ -142,7 +142,9 @@ def evaluate_gate(result: EvaluationResult, policy: ReleasePolicy | None) -> Gat
 def _direction(metric: str) -> Direction:
     if metric in _LOWER_IS_BETTER:
         return "lower_is_better"
-    if metric == "success_rate" or metric.endswith(".pass_rate"):
+    if metric == "success_rate" or metric.endswith(".pass_rate") or metric.endswith(".mean_score"):
+        # CP 9.2: a graded evaluator mean_score is always higher-is-better
+        # (EvaluatorScore.score: 1.0 == best). No RAG/agent-specific rule.
         return "higher_is_better"
     raise ConfigError(f"gate has no direction rule for metric {metric!r}")
 

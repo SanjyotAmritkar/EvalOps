@@ -408,6 +408,63 @@ def test_dataset_round_trip_preserves_expected_retrieval_ids(sessions: Sessions)
     assert loaded.cases[1].expected_retrieval_ids == ()
 
 
+def test_evaluation_run_round_trip_preserves_tool_call_evidence(
+    sessions: Sessions, graph: Graph
+) -> None:
+    run = domain.EvaluationRun(
+        experiment_id=graph.experiment.id,
+        system_version_id=graph.baseline.id,
+        case_id=graph.dataset.cases[0].id,
+        repeat_index=0,
+        output="done",
+        tool_calls=(
+            domain.ToolCall(
+                name="search", arguments={"q": "cats", "limit": 5}, result=[1, 2], ok=True
+            ),
+            domain.ToolCall(name="delete", arguments={}, ok=False, error="denied"),
+        ),
+    )
+    with unit_of_work(sessions) as session:
+        EvaluationRunRepository(session).add(run)
+
+    with unit_of_work(sessions) as session:
+        loaded = EvaluationRunRepository(session).get(run.id)
+
+    assert loaded == run
+    assert loaded is not None
+    assert [c.name for c in loaded.tool_calls] == ["search", "delete"]
+    assert dict(loaded.tool_calls[0].arguments) == {"q": "cats", "limit": 5}
+    assert loaded.tool_calls[1].ok is False and loaded.tool_calls[1].error == "denied"
+
+
+def test_dataset_round_trip_preserves_expected_tool_calls(sessions: Sessions) -> None:
+    project = _project()
+    dataset = _dataset(
+        project,
+        domain.DatasetCase(
+            input="agent q",
+            expected_tool_calls=(
+                domain.ExpectedToolCall("search", {"q": "x"}),
+                domain.ExpectedToolCall("summarize"),
+            ),
+        ),
+        domain.DatasetCase(input="plain q", expected_output="x"),
+    )
+    with unit_of_work(sessions) as session:
+        ProjectRepository(session).add(project)
+        DatasetRepository(session).add(dataset)
+
+    with unit_of_work(sessions) as session:
+        loaded = DatasetRepository(session).get(dataset.id)
+
+    assert loaded == dataset
+    assert loaded is not None
+    assert [e.name for e in loaded.cases[0].expected_tool_calls] == ["search", "summarize"]
+    assert dict(loaded.cases[0].expected_tool_calls[0].arguments or {}) == {"q": "x"}
+    assert loaded.cases[0].expected_tool_calls[1].arguments is None
+    assert loaded.cases[1].expected_tool_calls == ()
+
+
 def test_case_result_round_trip_preserves_scores(sessions: Sessions, graph: Graph) -> None:
     exp = graph.experiment
     baseline = graph.baseline

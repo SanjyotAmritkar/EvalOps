@@ -36,6 +36,7 @@ from evalops.domain.errors import DomainValidationError, EvalOpsError
 from evalops.domain.ids import EntityId, new_id
 from evalops.domain.value_objects import (
     EvaluatorScore,
+    ExpectedToolCall,
     JudgeCalibrationCase,
     JudgeCalibrationMetrics,
     LabeledJudgeExample,
@@ -44,6 +45,7 @@ from evalops.domain.value_objects import (
     MetricKind,
     RetrievedItem,
     SampleSummary,
+    ToolCall,
     UsageMetrics,
 )
 
@@ -61,6 +63,7 @@ __all__ = [
     "Evaluator",
     "EvaluatorFamily",
     "EvaluatorScore",
+    "ExpectedToolCall",
     "Experiment",
     "JobStatus",
     "JudgeCalibration",
@@ -81,6 +84,7 @@ __all__ = [
     "RetrievedItem",
     "SampleSummary",
     "SystemVersion",
+    "ToolCall",
     "TraceOrigin",
     "UsageMetrics",
     "new_id",

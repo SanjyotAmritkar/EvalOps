@@ -153,6 +153,64 @@ def test_malformed_retrieval_config_raises_config_error(mock: Any) -> None:
         MockProvider().complete("p", _sv(mock))
 
 
+# --- tool-call evidence (Phase 9, CP 9.2) ---------------------------
+
+
+def test_no_tool_calls_by_default() -> None:
+    assert MockProvider().complete("x", _sv({"responses": {"x": "y"}})).tool_calls == ()
+
+
+def test_single_and_multiple_ordered_tool_calls_with_args_and_status() -> None:
+    sv = _sv(
+        {
+            "responses": {"Q: k": "a"},
+            "tool_calls": {
+                "Q: k": [
+                    {"name": "search", "arguments": {"q": "cats"}},
+                    {"name": "open", "arguments": {"id": 3}, "result": {"title": "t"}},
+                    {"name": "delete", "ok": False, "error": "denied"},
+                ]
+            },
+        }
+    )
+    calls = MockProvider().complete("Q: k", sv).tool_calls
+    assert [c.name for c in calls] == ["search", "open", "delete"]  # order preserved
+    assert dict(calls[0].arguments) == {"q": "cats"}
+    assert calls[1].result == {"title": "t"}
+    assert calls[2].ok is False and calls[2].error == "denied"
+    # deterministic
+    assert MockProvider().complete("Q: k", sv).tool_calls == calls
+
+
+def test_tool_calls_default_and_no_tools_case() -> None:
+    sv = _sv(
+        {
+            "responses": {},
+            "tool_calls": {"Q: k": []},  # explicitly no tools for this prompt
+            "tool_calls_default": [{"name": "fallback"}],
+        }
+    )
+    assert MockProvider().complete("Q: k", sv).tool_calls == ()
+    assert [c.name for c in MockProvider().complete("Q: other", sv).tool_calls] == ["fallback"]
+
+
+@pytest.mark.parametrize(
+    "mock",
+    [
+        {"tool_calls": "not a map"},
+        {"tool_calls": {"p": "not a list"}},
+        {"tool_calls": {"p": [{"arguments": {}}]}},  # missing name
+        {"tool_calls": {"p": [{"name": "t", "arguments": "not an object"}]}},
+        {"tool_calls": {"p": [{"name": "t", "ok": "yes"}]}},
+        {"tool_calls": {"p": [{"name": "t", "unknown": 1}]}},
+        {"tool_calls_default": [{"name": ""}]},
+    ],
+)
+def test_malformed_tool_calls_config_raises_config_error(mock: Any) -> None:
+    with pytest.raises(ConfigError):
+        MockProvider().complete("p", _sv(mock))
+
+
 @pytest.mark.parametrize(
     "mock",
     [

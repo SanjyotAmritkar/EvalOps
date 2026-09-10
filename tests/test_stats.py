@@ -331,6 +331,7 @@ def test_build_statistical_evidence_covers_gateable_metrics_in_order() -> None:
     assert [e.metric for e in evidence] == [
         "success_rate",
         "m.pass_rate",
+        "m.mean_score",  # CP 9.2: generic graded-score metric, continuous
         "latency_ms.mean",
         "cost_usd.mean",
     ]
@@ -424,10 +425,11 @@ def test_run_evaluation_attaches_evidence_onto_the_result() -> None:
 
     ev = run_evaluation(exp, ds, base, cand, None, evaluators=evaluators, providers=providers)
 
-    # Phase 1 aggregation metrics are untouched
+    # Phase 1 aggregation metrics, plus the CP 9.2 generic <name>.mean_score
     assert [m.metric for m in ev.result.metrics] == [
         "success_rate",
         "contains.pass_rate",
+        "contains.mean_score",
         "latency_ms.mean",
         "latency_ms.p95",
         "cost_usd.total",
@@ -438,6 +440,7 @@ def test_run_evaluation_attaches_evidence_onto_the_result() -> None:
     assert [e.metric for e in ev.result.evidence] == [
         "success_rate",
         "contains.pass_rate",
+        "contains.mean_score",
         "latency_ms.mean",
         "cost_usd.mean",
     ]

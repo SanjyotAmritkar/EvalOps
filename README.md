@@ -171,13 +171,30 @@ a feature is listed under **SHIPPED** only if its full path actually works today
   retrieval behaviour; it does not own a vector DB, embeddings, or the retrieval
   pipeline. One narrow additive migration; text-only providers, runs, and
   datasets are unchanged.
+- **Agent / tool evaluation foundation** (Phase 9, CP 9.2) — a provider
+  execution result can carry framework-neutral **tool-call evidence**
+  (`ToolCall`: `name` / `arguments` / `result` / `ok` / `error`, ordered),
+  threaded onto the run; `MockProvider` reports it deterministically. Four
+  deterministic evaluators — `tool_selection` (name-set Jaccard),
+  `tool_arguments` (structural, key-order-independent JSON comparison — *not*
+  semantic), `tool_success` (observed success rate), `tool_trajectory` (ordered
+  name-sequence Dice — *exact adherence, not task correctness*) — score against
+  `DatasetCase.expected_tool_calls`. EvalOps observes tool behaviour; it does
+  not execute external tools or plan. Also lands a **generic
+  `<evaluator>.mean_score` metric** for every evaluator (mean of
+  `EvaluatorScore.score`, higher-is-better), so a graded regression that stays
+  above an evaluator's pass threshold (recall 1.0 → 0.9, tool selection
+  1.0 → 0.8) is still visible to a `ReleasePolicy` — through the existing
+  aggregation / paired-bootstrap / gate path, no agent-specific logic. One
+  narrow additive migration; `pass_rate` metrics and text-only / RAG runs
+  unchanged.
 
 ### NOT YET SHIPPED
 
 - Hosted provider execution — OpenAI, Anthropic
 - Evaluation execution via the API
 - Statistical gating — bootstrap confidence intervals, significance, effect size
-- RAG generation-quality metrics beyond lexical groundedness; agent / tool-trajectory evaluation
+- RAG generation-quality metrics beyond lexical groundedness; semantic trajectory / agent-correctness judging
 - Cloud deployment
 
 `MockProvider` is deterministic test infrastructure for offline development and

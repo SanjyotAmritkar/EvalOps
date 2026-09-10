@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import Literal
+from collections.abc import Mapping
+from dataclasses import dataclass, field
+from types import MappingProxyType
+from typing import Any, Literal
 
 from evalops.domain.enums import EvaluatorFamily
 from evalops.domain.errors import DomainValidationError
@@ -59,6 +61,50 @@ class RetrievedItem:
             raise DomainValidationError("RetrievedItem.doc_id must be a non-empty string")
         if self.rank < 0:
             raise DomainValidationError(f"RetrievedItem.rank must be >= 0, got {self.rank}")
+
+
+@dataclass(frozen=True, slots=True)
+class ToolCall:
+    """One tool invocation an external agent reported making (Phase 9, CP 9.2).
+
+    Framework-neutral: no LangChain / LangGraph / OpenAI tool-call types, no MCP.
+    Order in the enclosing tuple *is* the sequence. EvalOps records what the
+    agent says it did; it never executes a tool.
+    """
+
+    name: str
+    arguments: Mapping[str, Any] = field(default_factory=dict)
+    result: Any = None
+    ok: bool = True
+    error: str | None = None
+
+    def __post_init__(self) -> None:
+        if not self.name.strip():
+            raise DomainValidationError("ToolCall.name must be a non-empty string")
+        if self.error is not None and not self.error.strip():
+            raise DomainValidationError("ToolCall.error must be non-blank when set")
+        if self.ok and self.error is not None:
+            raise DomainValidationError("a successful ToolCall (ok=True) has no error")
+        object.__setattr__(self, "arguments", MappingProxyType(dict(self.arguments)))
+
+
+@dataclass(frozen=True, slots=True)
+class ExpectedToolCall:
+    """Authored ground truth for one expected tool invocation (Phase 9, CP 9.2).
+
+    ``arguments is None`` means "only the tool name is expected here"; a mapping
+    means that exact structural payload is expected. Never fabricated -- absent
+    for every case that carries no agent labels.
+    """
+
+    name: str
+    arguments: Mapping[str, Any] | None = None
+
+    def __post_init__(self) -> None:
+        if not self.name.strip():
+            raise DomainValidationError("ExpectedToolCall.name must be a non-empty string")
+        if self.arguments is not None:
+            object.__setattr__(self, "arguments", MappingProxyType(dict(self.arguments)))
 
 
 @dataclass(frozen=True, slots=True)

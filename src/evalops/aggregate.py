@@ -19,11 +19,21 @@ from evalops.runner import RunOutcome
 def expected_metric_names(evaluator_names: Sequence[str]) -> tuple[str, ...]:
     """Metric names ``aggregate_results`` will produce, in the order it emits them.
 
+    Per evaluator, both ``<name>.pass_rate`` (binary; from ``EvaluatorScore.passed``)
+    and ``<name>.mean_score`` (continuous; mean of ``EvaluatorScore.score``) are
+    emitted -- the latter (CP 9.2) is a **generic** metric for every evaluator,
+    higher-is-better, so a graded regression that stays above the pass threshold
+    is still visible to a ReleasePolicy.
+
     Callers use this to validate a ReleasePolicy before any execution.
     """
+    per_evaluator: list[str] = []
+    for name in evaluator_names:
+        per_evaluator.append(f"{name}.pass_rate")
+        per_evaluator.append(f"{name}.mean_score")
     return (
         "success_rate",
-        *(f"{name}.pass_rate" for name in evaluator_names),
+        *per_evaluator,
         "latency_ms.mean",
         "latency_ms.p95",
         "cost_usd.total",
@@ -69,6 +79,13 @@ def aggregate_results(
                 metric=f"{name}.pass_rate",
                 baseline_value=_pass_rate(baseline_runs, results_by_run, name),
                 candidate_value=_pass_rate(candidate_runs, results_by_run, name),
+            )
+        )
+        metrics.append(
+            MetricComparison(
+                metric=f"{name}.mean_score",
+                baseline_value=_mean_score(baseline_runs, results_by_run, name),
+                candidate_value=_mean_score(candidate_runs, results_by_run, name),
             )
         )
     metrics += [
@@ -117,6 +134,32 @@ def _pass_rate(
         if score.passed:
             passed += 1
     return passed / len(runs)
+
+
+def _mean_score(
+    runs: Sequence[EvaluationRun],
+    results_by_run: dict[str, CaseResult],
+    evaluator_name: str,
+) -> float:
+    """Mean of ``EvaluatorScore.score`` for ``evaluator_name`` over ``runs``.
+
+    A failed provider run contributes ``0.0`` -- the same denominator rule
+    :func:`_pass_rate` uses. Deterministic: a plain arithmetic mean, no CI.
+    """
+    if not runs:
+        return 0.0
+    total = 0.0
+    for run in runs:
+        if run.error is not None:
+            continue  # failed provider run: 0.0 in the numerator, counted in the denominator
+        scores = {s.evaluator: s for s in results_by_run[run.id].scores}
+        score = scores.get(evaluator_name)
+        if score is None:
+            raise ConfigError(
+                f"successful run {run.id!r} is missing the {evaluator_name!r} evaluator score"
+            )
+        total += score.score
+    return total / len(runs)
 
 
 def _successful_latencies(runs: Sequence[EvaluationRun]) -> list[float]:

@@ -37,6 +37,57 @@ def _retrieval_from_json(raw: object) -> tuple[domain.RetrievedItem, ...]:
     )
 
 
+def _tool_calls_to_json(calls: tuple[domain.ToolCall, ...]) -> list[dict[str, Any]]:
+    return [
+        {
+            "name": c.name,
+            "arguments": dict(c.arguments),
+            "result": c.result,
+            "ok": c.ok,
+            "error": c.error,
+        }
+        for c in calls
+    ]
+
+
+def _tool_calls_from_json(raw: object) -> tuple[domain.ToolCall, ...]:
+    if not isinstance(raw, list):
+        return ()
+    return tuple(
+        domain.ToolCall(
+            name=str(entry["name"]),
+            arguments=dict(entry.get("arguments") or {}),
+            result=entry.get("result"),
+            ok=bool(entry.get("ok", True)),
+            error=entry.get("error"),
+        )
+        for entry in raw
+        if isinstance(entry, dict) and entry.get("name")
+    )
+
+
+def _expected_tool_calls_to_json(
+    calls: tuple[domain.ExpectedToolCall, ...],
+) -> list[dict[str, Any]]:
+    return [
+        {"name": c.name, "arguments": None if c.arguments is None else dict(c.arguments)}
+        for c in calls
+    ]
+
+
+def _expected_tool_calls_from_json(raw: object) -> tuple[domain.ExpectedToolCall, ...]:
+    if not isinstance(raw, list):
+        return ()
+    return tuple(
+        domain.ExpectedToolCall(
+            name=str(entry["name"]),
+            arguments=None if entry.get("arguments") is None else dict(entry["arguments"]),
+        )
+        for entry in raw
+        if isinstance(entry, dict) and entry.get("name")
+    )
+
+
 def _aware(value: datetime) -> datetime:
     """Backends without native tz storage (SQLite) return naive datetimes; the
     domain stores UTC, so re-attach it."""
@@ -86,6 +137,7 @@ def _case_to_orm(value: domain.DatasetCase, position: int) -> orm.DatasetCase:
         input=value.input,
         expected_output=value.expected_output,
         expected_retrieval_ids=list(value.expected_retrieval_ids),
+        expected_tool_calls=_expected_tool_calls_to_json(value.expected_tool_calls),
         origin=value.origin,
         source_trace_id=value.source_trace_id,
     )
@@ -97,6 +149,7 @@ def _case_from_orm(row: orm.DatasetCase) -> domain.DatasetCase:
         input=row.input,
         expected_output=row.expected_output,
         expected_retrieval_ids=tuple(row.expected_retrieval_ids or ()),
+        expected_tool_calls=_expected_tool_calls_from_json(row.expected_tool_calls),
         origin=row.origin,
         source_trace_id=row.source_trace_id,
     )
@@ -200,6 +253,7 @@ def evaluation_run_to_orm(value: domain.EvaluationRun) -> orm.EvaluationRun:
         output=value.output,
         error=value.error,
         retrieval=_retrieval_to_json(value.retrieval),
+        tool_calls=_tool_calls_to_json(value.tool_calls),
         prompt_tokens=value.usage.prompt_tokens,
         completion_tokens=value.usage.completion_tokens,
         cost_usd=value.usage.cost_usd,
@@ -218,6 +272,7 @@ def evaluation_run_from_orm(row: orm.EvaluationRun) -> domain.EvaluationRun:
         output=row.output,
         error=row.error,
         retrieval=_retrieval_from_json(row.retrieval),
+        tool_calls=_tool_calls_from_json(row.tool_calls),
         usage=domain.UsageMetrics(
             prompt_tokens=row.prompt_tokens,
             completion_tokens=row.completion_tokens,

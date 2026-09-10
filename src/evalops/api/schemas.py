@@ -49,6 +49,14 @@ class ProjectRead(BaseModel):
 # --- Dataset ------------------------------------------------------------
 
 
+class ExpectedToolCallSpec(_Create):
+    """Authored expected tool call (CP 9.2). ``arguments`` omitted / null means
+    "only the tool name is expected here"."""
+
+    name: str
+    arguments: dict[str, Any] | None = None
+
+
 class DatasetCaseCreate(_Create):
     input: str
     expected_output: str | None = None
@@ -56,6 +64,8 @@ class DatasetCaseCreate(_Create):
     source_trace_id: str | None = None
     # RAG ground truth (Phase 9): relevant document/chunk ids for this case.
     expected_retrieval_ids: list[str] = []
+    # Agent ground truth (CP 9.2): the expected ordered tool trajectory.
+    expected_tool_calls: list[ExpectedToolCallSpec] = []
 
 
 class DatasetCreate(_Create):
@@ -74,6 +84,11 @@ class TraceDatasetCreate(_Create):
     trace_ids: Annotated[list[str], Field(min_length=1)]
 
 
+class ExpectedToolCallRead(BaseModel):
+    name: str
+    arguments: dict[str, Any] | None
+
+
 class DatasetCaseRead(BaseModel):
     id: str
     input: str
@@ -81,6 +96,7 @@ class DatasetCaseRead(BaseModel):
     origin: CaseOrigin
     source_trace_id: str | None
     expected_retrieval_ids: list[str] = []
+    expected_tool_calls: list[ExpectedToolCallRead] = []
 
 
 class DatasetRead(BaseModel):
@@ -107,6 +123,13 @@ class DatasetRead(BaseModel):
                     origin=case.origin,
                     source_trace_id=case.source_trace_id,
                     expected_retrieval_ids=list(case.expected_retrieval_ids),
+                    expected_tool_calls=[
+                        ExpectedToolCallRead(
+                            name=e.name,
+                            arguments=None if e.arguments is None else dict(e.arguments),
+                        )
+                        for e in case.expected_tool_calls
+                    ],
                 )
                 for case in value.cases
             ],
@@ -299,6 +322,9 @@ class EvaluatorSpec(_Create):
     min_recall: float | None = None
     min_precision: float | None = None
     min_groundedness: float | None = None
+    # Agent evaluators (CP 9.2) -- pass threshold on the graded score (0..1).
+    # tool_selection / tool_arguments / tool_success / tool_trajectory.
+    min_score: float | None = None
 
 
 class RunRequest(_Create):
@@ -467,6 +493,16 @@ class RetrievedItemRead(BaseModel):
     score: float | None
 
 
+class ToolCallRead(BaseModel):
+    """One tool invocation an external agent reported (Phase 9, CP 9.2)."""
+
+    name: str
+    arguments: dict[str, Any]
+    result: Any = None
+    ok: bool
+    error: str | None
+
+
 class EvaluationRunRead(BaseModel):
     id: str
     system_version_id: str
@@ -478,6 +514,8 @@ class EvaluationRunRead(BaseModel):
     scores: list[EvaluatorScoreRead]
     #: RAG retrieval evidence, empty for text-only runs (Phase 9).
     retrieval: list[RetrievedItemRead] = []
+    #: Agent tool-call evidence, empty for non-agent runs (CP 9.2).
+    tool_calls: list[ToolCallRead] = []
     created_at: datetime
 
     @classmethod
@@ -506,6 +544,16 @@ class EvaluationRunRead(BaseModel):
                     score=item.score,
                 )
                 for item in run.retrieval
+            ],
+            tool_calls=[
+                ToolCallRead(
+                    name=tc.name,
+                    arguments=dict(tc.arguments),
+                    result=tc.result,
+                    ok=tc.ok,
+                    error=tc.error,
+                )
+                for tc in run.tool_calls
             ],
             scores=[]
             if case_result is None

@@ -187,9 +187,11 @@ def test_non_rag_run_is_unaffected() -> None:
     )
 
     assert all(run.retrieval == () for run in outcome.outcome.runs)
+    assert all(run.tool_calls == () for run in outcome.outcome.runs)
     assert {m.metric for m in outcome.result.metrics} == {
         "success_rate",
         "contains.pass_rate",
+        "contains.mean_score",  # CP 9.2: generic, added for every evaluator
         "latency_ms.mean",
         "latency_ms.p95",
         "cost_usd.total",

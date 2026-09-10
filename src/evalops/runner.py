@@ -104,6 +104,7 @@ def _execute(
         output=response.text,
         usage=response.usage,
         retrieval=response.retrieval,
+        tool_calls=response.tool_calls,
     )
 
 

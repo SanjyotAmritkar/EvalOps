@@ -143,6 +143,29 @@ def _pass_obs(
     return 1.0 if score.passed else 0.0
 
 
+def _score_obs(
+    run: EvaluationRun,
+    case_results: dict[str, CaseResult],
+    evaluator_name: str,
+) -> float:
+    """The run's ``EvaluatorScore.score`` for ``evaluator_name`` (CP 9.2).
+
+    A failed provider run contributes 0.0 -- same denominator rule as pass-rate.
+    Continuous observation in [0, 1] for the ``<name>.mean_score`` metric.
+    """
+    if run.error is not None:
+        return 0.0
+    case_result = case_results.get(run.id)
+    if case_result is None:
+        raise ConfigError(f"successful run {run.id!r} has no case result")
+    score = next((s for s in case_result.scores if s.evaluator == evaluator_name), None)
+    if score is None:
+        raise ConfigError(
+            f"successful run {run.id!r} is missing the {evaluator_name!r} evaluator score"
+        )
+    return score.score
+
+
 def _series(
     metric: str,
     kind: MetricKind,
@@ -183,6 +206,8 @@ def paired_observations(
       comparable pair contributes.
     * ``<name>.pass_rate`` -- binary indicator per run (0.0 on error or a
       non-passing score); every comparable pair contributes.
+    * ``<name>.mean_score`` -- the run's ``EvaluatorScore.score`` (CP 9.2),
+      continuous in [0, 1]; 0.0 on error; every comparable pair contributes.
     * ``latency_ms.mean`` -- the run's latency; a pair is **dropped** when
       either side errored (a failed run has no meaningful latency).
     * ``cost_usd.mean`` -- the run's recorded cost; a failed run genuinely
@@ -218,12 +243,23 @@ def paired_observations(
     )
 
     for name in names:
-        metric = f"{name}.pass_rate"
-        series[metric] = _series(
-            metric,
+        pass_metric = f"{name}.pass_rate"
+        series[pass_metric] = _series(
+            pass_metric,
             "binary",
             tuple(_pass_obs(b, case_results, name) for b, _ in pairs),
             tuple(_pass_obs(c, case_results, name) for _, c in pairs),
+            matched=matched,
+            comparable=matched,
+            dropped=0,
+            unmatched=unmatched,
+        )
+        score_metric = f"{name}.mean_score"
+        series[score_metric] = _series(
+            score_metric,
+            "continuous",
+            tuple(_score_obs(b, case_results, name) for b, _ in pairs),
+            tuple(_score_obs(c, case_results, name) for _, c in pairs),
             matched=matched,
             comparable=matched,
             dropped=0,

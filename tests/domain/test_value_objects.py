@@ -8,7 +8,13 @@ import pytest
 
 from evalops.domain.enums import EvaluatorFamily
 from evalops.domain.errors import DomainValidationError
-from evalops.domain.value_objects import EvaluatorScore, RetrievedItem, UsageMetrics
+from evalops.domain.value_objects import (
+    EvaluatorScore,
+    ExpectedToolCall,
+    RetrievedItem,
+    ToolCall,
+    UsageMetrics,
+)
 
 
 class TestUsageMetrics:
@@ -111,3 +117,42 @@ class TestRetrievedItem:
         item = RetrievedItem(doc_id="d1", content="x", rank=0)
         with pytest.raises(FrozenInstanceError):
             item.doc_id = "d2"  # type: ignore[misc]
+
+
+class TestToolCall:
+    def test_defaults_and_read_only_arguments(self) -> None:
+        tc = ToolCall(name="search")
+        assert dict(tc.arguments) == {} and tc.result is None and tc.ok is True
+        tc2 = ToolCall(name="search", arguments={"q": "x"})
+        with pytest.raises(TypeError):
+            tc2.arguments["q"] = "y"  # type: ignore[index]
+
+    def test_arguments_do_not_alias_the_callers_dict(self) -> None:
+        mutable = {"q": "x"}
+        tc = ToolCall(name="s", arguments=mutable)
+        mutable["q"] = "changed"
+        assert dict(tc.arguments) == {"q": "x"}
+
+    def test_blank_name_and_ok_with_error_rejected(self) -> None:
+        with pytest.raises(DomainValidationError):
+            ToolCall(name="  ")
+        with pytest.raises(DomainValidationError):
+            ToolCall(name="s", ok=True, error="boom")
+        with pytest.raises(DomainValidationError):
+            ToolCall(name="s", ok=False, error="   ")
+
+    def test_failed_call_with_error_is_allowed(self) -> None:
+        assert ToolCall(name="s", ok=False, error="denied").error == "denied"
+
+
+class TestExpectedToolCall:
+    def test_name_only_and_with_args(self) -> None:
+        assert ExpectedToolCall("search").arguments is None
+        e = ExpectedToolCall("search", {"q": "x"})
+        assert e.arguments is not None and dict(e.arguments) == {"q": "x"}
+        with pytest.raises(TypeError):
+            e.arguments["q"] = "y"  # type: ignore[index]
+
+    def test_blank_name_rejected(self) -> None:
+        with pytest.raises(DomainValidationError):
+            ExpectedToolCall("  ")

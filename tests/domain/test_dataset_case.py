@@ -66,3 +66,18 @@ def test_expected_retrieval_ids_default_empty_and_normalise_to_tuple() -> None:
 def test_blank_expected_retrieval_id_is_rejected() -> None:
     with pytest.raises(DomainValidationError):
         DatasetCase(input="q", expected_retrieval_ids=("d1", "  "))
+
+
+def test_expected_tool_calls_default_empty_and_normalise_to_tuple() -> None:
+    from evalops.domain.value_objects import ExpectedToolCall
+
+    assert DatasetCase(input="q").expected_tool_calls == ()
+    calls = [ExpectedToolCall("search", {"q": "x"}), ExpectedToolCall("done")]
+    case = DatasetCase(input="q", expected_tool_calls=calls)  # type: ignore[arg-type]
+    assert case.expected_tool_calls == tuple(calls)
+    assert isinstance(case.expected_tool_calls, tuple)
+
+
+def test_non_expected_tool_call_entry_is_rejected() -> None:
+    with pytest.raises(DomainValidationError):
+        DatasetCase(input="q", expected_tool_calls=("search",))  # type: ignore[arg-type]

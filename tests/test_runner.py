@@ -10,7 +10,12 @@ import pytest
 from evalops.domain.contracts import Evaluator, ProviderClient, ProviderError, ProviderResponse
 from evalops.domain.entities import Dataset, DatasetCase, EvaluationRun, Experiment, SystemVersion
 from evalops.domain.enums import EvaluatorFamily, ProviderName
-from evalops.domain.value_objects import EvaluatorScore, RetrievedItem, UsageMetrics
+from evalops.domain.value_objects import (
+    EvaluatorScore,
+    RetrievedItem,
+    ToolCall,
+    UsageMetrics,
+)
 from evalops.errors import ConfigError
 from evalops.evaluators import ExactMatch, RegexMatch
 from evalops.runner import RunOutcome, run_experiment
@@ -29,12 +34,14 @@ class _StubProvider:
         fail_on: Collection[str] = (),
         raises: type[BaseException] | None = None,
         retrieval: tuple[RetrievedItem, ...] = (),
+        tool_calls: tuple[ToolCall, ...] = (),
     ) -> None:
         self.name = name
         self._response = response
         self._fail_on = set(fail_on)
         self._raises = raises
         self._retrieval = retrieval
+        self._tool_calls = tool_calls
         self.seen: list[str] = []
 
     def complete(self, prompt: str, config: SystemVersion) -> ProviderResponse:
@@ -47,6 +54,7 @@ class _StubProvider:
             text=self._response,
             usage=UsageMetrics(prompt_tokens=2, completion_tokens=3, latency_ms=7.0),
             retrieval=self._retrieval,
+            tool_calls=self._tool_calls,
         )
 
 
@@ -210,6 +218,7 @@ def test_successful_output_and_usage_are_preserved() -> None:
     assert (run.usage.prompt_tokens, run.usage.completion_tokens) == (2, 3)
     assert run.usage.latency_ms == 7.0
     assert run.retrieval == ()  # text-only provider: no retrieval evidence
+    assert run.tool_calls == ()  # text-only provider: no tool-call evidence
 
 
 def test_provider_retrieval_evidence_is_threaded_onto_the_run() -> None:
@@ -236,6 +245,31 @@ def test_provider_retrieval_evidence_is_threaded_onto_the_run() -> None:
         },
     )
     assert all(run.retrieval == () for run in failed.runs)
+
+
+def test_provider_tool_call_evidence_is_threaded_onto_the_run() -> None:
+    baseline, candidate = _sv(), _sv(prompt="X: ${input}")
+    calls = (
+        ToolCall(name="search", arguments={"q": "cats"}),
+        ToolCall(name="done", ok=False, error="nope"),
+    )
+    outcome = _run(
+        baseline=baseline,
+        candidate=candidate,
+        dataset=_dataset("a"),
+        providers={ProviderName.OPENAI: _StubProvider("openai", tool_calls=calls)},
+    )
+    assert outcome.runs[0].tool_calls == calls
+
+    failed = _run(
+        baseline=baseline,
+        candidate=candidate,
+        dataset=_dataset("a"),
+        providers={
+            ProviderName.OPENAI: _StubProvider("openai", fail_on={"P: a", "X: a"}, tool_calls=calls)
+        },
+    )
+    assert all(run.tool_calls == () for run in failed.runs)
 
 
 def test_one_case_result_per_run_in_order() -> None:

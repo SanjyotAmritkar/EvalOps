@@ -88,6 +88,7 @@ def test_enqueue_runs_job_to_completion_and_links_result(
     assert [e.metric for e in results[0].evidence] == [
         "success_rate",
         "contains.pass_rate",
+        "contains.mean_score",  # CP 9.2
         "latency_ms.mean",
         "cost_usd.mean",
     ]

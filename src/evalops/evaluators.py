@@ -14,6 +14,12 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
 
+from evalops.agent_evaluators import (
+    ToolArguments,
+    ToolSelection,
+    ToolSuccess,
+    ToolTrajectory,
+)
 from evalops.domain.contracts import Evaluator
 from evalops.domain.entities import DatasetCase, EvaluationRun
 from evalops.domain.enums import EvaluatorFamily, ProviderName
@@ -111,6 +117,10 @@ _EVALUATOR_TYPES = (
     "retrieval_recall",
     "context_precision",
     "groundedness",
+    "tool_selection",
+    "tool_arguments",
+    "tool_success",
+    "tool_trajectory",
 )
 
 
@@ -164,6 +174,26 @@ def build_evaluators(specs: Sequence[Mapping[str, Any]]) -> tuple[Evaluator, ...
             evaluator = GroundednessLexical(
                 min_groundedness=_spec_float(spec, "min_groundedness", label, default=0.8),
                 name=name or "groundedness_lexical",
+            )
+        elif evaluator_type == "tool_selection":
+            evaluator = ToolSelection(
+                min_score=_spec_float(spec, "min_score", label, default=1.0),
+                name=name or "tool_selection",
+            )
+        elif evaluator_type == "tool_arguments":
+            evaluator = ToolArguments(
+                min_score=_spec_float(spec, "min_score", label, default=1.0),
+                name=name or "tool_arguments",
+            )
+        elif evaluator_type == "tool_success":
+            evaluator = ToolSuccess(
+                min_score=_spec_float(spec, "min_score", label, default=1.0),
+                name=name or "tool_success",
+            )
+        elif evaluator_type == "tool_trajectory":
+            evaluator = ToolTrajectory(
+                min_score=_spec_float(spec, "min_score", label, default=1.0),
+                name=name or "tool_trajectory",
             )
         else:
             raise ConfigError(

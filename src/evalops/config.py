@@ -14,6 +14,7 @@ from typing import Any, TypeVar, cast
 
 import yaml
 
+from evalops.agent_evaluators import ToolArguments, ToolSelection, ToolTrajectory
 from evalops.aggregate import expected_metric_names
 from evalops.datasets import load_jsonl
 from evalops.domain.contracts import Evaluator, ProviderClient
@@ -97,6 +98,7 @@ def load_run_plan(config_path: str | Path) -> RunPlan:
     evaluators = _build_evaluators(root)
     _check_reference_outputs(evaluators, dataset)
     _check_retrieval_labels(evaluators, dataset)
+    _check_tool_labels(evaluators, dataset)
 
     policy = _build_policy(root, [e.name for e in evaluators])
 
@@ -167,6 +169,27 @@ def _check_retrieval_labels(evaluators: Sequence[Evaluator], dataset: Dataset) -
             "retrieval_recall/context_precision require expected_retrieval_ids on every "
             f"case; missing for: {missing}"
         )
+
+
+def _check_tool_labels(evaluators: Sequence[Evaluator], dataset: Dataset) -> None:
+    if any(isinstance(e, ToolSelection | ToolTrajectory) for e in evaluators):
+        missing = [case.id for case in dataset.cases if not case.expected_tool_calls]
+        if missing:
+            raise ConfigError(
+                "tool_selection/tool_trajectory require expected_tool_calls on every "
+                f"case; missing for: {missing}"
+            )
+    if any(isinstance(e, ToolArguments) for e in evaluators):
+        missing = [
+            case.id
+            for case in dataset.cases
+            if not any(e.arguments is not None for e in case.expected_tool_calls)
+        ]
+        if missing:
+            raise ConfigError(
+                "tool_arguments requires at least one expected_tool_calls entry with "
+                f"explicit arguments on every case; missing for: {missing}"
+            )
 
 
 def _build_policy(root: Mapping[str, Any], evaluator_names: Sequence[str]) -> ReleasePolicy | None:
