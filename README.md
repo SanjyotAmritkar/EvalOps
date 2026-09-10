@@ -115,6 +115,14 @@ a feature is listed under **SHIPPED** only if its full path actually works today
   `run_evaluation` orchestration as the persisted/API path, so its release
   decision — statistical guard, blocking reasons and advisories — is identical
   to what the dashboard shows for equivalent data.
+- **GitHub PR release gate** — [`.github/workflows/release-gate.yml`](.github/workflows/release-gate.yml)
+  runs `evalops run <deterministic mock config> --json` on every `pull_request`
+  (and `workflow_dispatch`), renders a `$GITHUB_STEP_SUMMARY` from the
+  schema-v2 JSON (`python -m evalops.ci`, no re-derived logic), and always
+  uploads the full JSON report as an artifact. The job fails only on a real
+  BLOCK (exit 1) or an execution/config error (exit 2) — the summary keeps the
+  two distinct; **PASS-with-advisories stays a PASS** (exit 0, green). Offline:
+  `backend: mock`, no network, no `OPENAI_API_KEY` / `ANTHROPIC_API_KEY`.
 - Worked examples: [examples/support/](examples/support/) — `regression.yaml`
   BLOCKs on a latency budget while quality improves; `fixed.yaml` PASSes;
   `ollama.yaml` is a real local smoke run, verified end to end against a local
@@ -157,7 +165,7 @@ CI — **not** model inference. `OllamaProvider` is real local model inference.
 | 4 | Distributed execution: Redis + Celery, retries, idempotency, cancellation |
 | 5 | Statistical evaluation: repeated sampling, bootstrap CI, paired comparison, effect size |
 | 6 | Judge calibration: labeled calibration set, agreement metrics (Cohen's κ, precision/recall/F1) |
-| 7 | GitHub CI gate: `evalops gate` with non-zero exit on regression |
+| 7 | GitHub CI gate: PR-triggered `evalops run --json` workflow, PR step summary, non-zero exit on a real BLOCK (shipped) |
 | 8 | Production trace -> regression case loop: ingestion, viewer, promote-to-regression, dataset versioning |
 | 9 | RAG + agent evaluation, extending the same evaluator abstraction |
 | 10 | Polish: structured logging -> OpenTelemetry, optional Grafana, one cloud deployment |
@@ -254,6 +262,24 @@ uv run evalops run examples/support/fixed.yaml --json - --quiet   # JSON only
 `--json PATH` also writes the machine-readable result to a file. All numbers in
 these examples come from the built-in deterministic mock provider, not a real
 model.
+
+Exit codes (the CI contract): **`0`** = PASS, including a PASS that carries
+advisories (a threshold was breached but the evidence is too weak to block);
+**`1`** = release BLOCK; **`2`** = configuration / execution / provider / judge
+error (no release decision produced).
+
+### GitHub PR release gate
+
+`.github/workflows/release-gate.yml` gates pull requests. On each PR it runs the
+deterministic evaluation above, writes the schema-v2 JSON to a file, uploads
+that file as the **`evalops-report`** artifact (always, when it exists), and
+publishes a PR **Step Summary** — PASS / BLOCK / ERROR heading, blocking
+reasons, advisories, and a compact metric table — rendered by
+`python -m evalops.ci` straight from the JSON (it never re-computes a decision).
+The workflow **fails only on exit 1 (BLOCK) or exit 2 (error)**, and the summary
+keeps those two cases distinct. A PASS with advisories is green. Run it manually
+with **Actions → EvalOps Release Gate → Run workflow** (optionally pointing
+`config` at `examples/support/regression.yaml` to see the BLOCK path).
 
 To run against a real local model instead, install [Ollama](https://ollama.com),
 start it (`ollama serve`), pull a model (`ollama pull llama3.2`), and:

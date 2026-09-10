@@ -136,7 +136,7 @@ Justify the migration explicitly in the README: *started synchronous to validate
 | Frontend | Next.js, TypeScript, Tailwind | No Streamlit — this is a product, not a notebook |
 | Observability (late-stage) | Structured JSON logs → OpenTelemetry → Prometheus/Grafana | Logs are sufficient for V1 |
 | Infra | Docker Compose (local) → Render/Fly.io/ECS (one deployed instance) | No Kubernetes requirement |
-| CI | GitHub Actions | Runs the `evalops gate` command on relevant PRs |
+| CI | GitHub Actions | Runs `evalops run --json` on relevant PRs and gates the merge |
 
 ---
 
@@ -360,7 +360,23 @@ Exit codes are unchanged and machine-safe for GitHub Actions: **0** = PASS
 (including PASS with advisories), **1** = release BLOCK, **2** = any
 config/execution/provider/judge error. No interactive prompts; nothing but the
 report is written to stdout; a deterministic mock config is byte-identical
-across runs. GitHub-specific glue is CP 7.2.
+across runs.
+
+**GitHub PR gate (CP 7.2, shipped).** `.github/workflows/release-gate.yml`
+triggers on `pull_request` and `workflow_dispatch`. On `ubuntu-latest` /
+Python 3.11 (uv + `uv sync --locked`, the repo's existing conventions) it:
+runs `evalops run <deterministic mock config> --json <file> --quiet` capturing
+the exit code without failing the step (`set +e`); always uploads the schema-v2
+JSON as an artifact via `actions/upload-artifact` (`if-no-files-found: ignore`);
+then `python -m evalops.ci --exit-code N --report <file> --log <stderr>` renders
+`$GITHUB_STEP_SUMMARY` (PASS / BLOCK / ERROR heading, blocking reasons,
+advisories, a compact metric table) and **exits with N verbatim** so the job
+status *is* the gate. `evalops.ci` re-derives nothing — it only formats the
+CLI's JSON, which came from the same shared `run_evaluation` path a local CI
+run or the dashboard uses, and keeps exit 1 (BLOCK) and exit 2 (error) visually
+and semantically distinct. PASS-with-advisories is a green PASS. No hosted
+providers, no secrets, no bot comments / Checks API / commit-status calls —
+GitHub's native workflow status is the check.
 
 ---
 
@@ -441,7 +457,7 @@ auto-gating are out of scope.
 | 4 | Distributed execution: Redis + Celery, retries, idempotency, cancellation | Kill a worker mid-run and verify recovery |
 | 5 | Statistical evaluation: repeated sampling, bootstrap CI, paired comparison, effect size | Release policy is statistically grounded, not a naive point comparison |
 | 6 | Judge calibration: build the labeled calibration set, compute agreement metrics | `calibration_report.json` exists and is referenced in the README |
-| 7 | GitHub CI gate: `evalops gate` with non-zero exit on regression | A deliberately bad candidate turns a GitHub Actions check red |
+| 7 | GitHub CI gate: PR-triggered `evalops run --json` workflow, PR step summary, non-zero exit on a real BLOCK | A deliberately bad candidate turns a GitHub Actions check red |
 | 8 | Production trace feedback loop: trace ingestion, trace viewer, promote-to-regression, dataset versioning | A traced failure becomes a permanent regression case |
 | 9 | RAG + agent evaluation, extending the existing evaluator abstraction | No separate evaluation subsystem was built to support this |
 | 10 | Polish: structured logging → OpenTelemetry, Grafana if useful, one real cloud deployment, failure clustering as a stretch feature | `docker compose up` reproduces the full system locally |
@@ -487,7 +503,7 @@ Stretch (once Phase 8 exists):
 /execution_service  persisted experiment execution: load → run → persist → gate, HTTP-independent
 /worker             Celery worker: broker = Redis, one task -> execution_service (Phase 4)
 /dashboard          Next.js app
-/ci                 evalops gate command + GitHub Actions workflow
+/ci                 evalops.ci step-summary renderer + .github/workflows/release-gate.yml
 /infra              docker-compose, Dockerfiles
 /docs               this file and any supporting design docs
 ```

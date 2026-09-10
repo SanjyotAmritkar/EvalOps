@@ -1,0 +1,82 @@
+name: EvalOps Release Gate
+
+# Runs a deterministic EvalOps evaluation on every pull request and renders a
+# PR-facing summary. The workflow fails only on a real release BLOCK (CLI exit
+# 1) or an execution/config error (CLI exit 2); PASS-with-advisories is a PASS.
+# The full schema-v2 JSON report is always uploaded as an artifact.
+#
+# It does NOT re-implement gate logic: it invokes `evalops run --json` (the
+# shared run_evaluation path, identical to the API/dashboard) and formats its
+# output via `python -m evalops.ci`.
+
+on:
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      config:
+        description: "evalops run config to gate on (deterministic / mock backend, no API keys)"
+        required: false
+        default: "examples/support/fixed.yaml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  release-gate:
+    name: EvalOps release gate
+    runs-on: ubuntu-latest
+    env:
+      # The example is deterministic (backend: mock) and needs no network or keys.
+      EVALOPS_CONFIG: ${{ inputs.config || 'examples/support/fixed.yaml' }}
+      EVALOPS_REPORT: evalops-report.json
+      EVALOPS_LOG: evalops-run.log
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          version: "0.12.10"
+          python-version: "3.11"
+          enable-cache: true
+
+      - name: Install dependencies
+        run: uv sync --locked
+
+      - name: Run EvalOps release gate
+        id: gate
+        run: |
+          # Never let this step fail the job: capture the exit code and hand it
+          # to the summary step, which is the single place that enforces it.
+          set +e
+          uv run evalops run "$EVALOPS_CONFIG" --json "$EVALOPS_REPORT" --quiet 2> "$EVALOPS_LOG"
+          code=$?
+          set -e
+          echo "exit_code=$code" >> "$GITHUB_OUTPUT"
+          echo "evalops run exited $code"
+          exit 0
+
+      - name: Upload evaluation report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: evalops-report
+          path: ${{ env.EVALOPS_REPORT }}
+          if-no-files-found: ignore
+
+      - name: Render PR summary and enforce gate
+        if: always()
+        run: |
+          # Exits with the CLI's code verbatim: 0 = PASS (incl. advisories),
+          # 1 = BLOCK, 2 = error. GitHub's job status is then the release gate.
+          uv run python -m evalops.ci \
+            --exit-code "${{ steps.gate.outputs.exit_code }}" \
+            --report "$EVALOPS_REPORT" \
+            --log "$EVALOPS_LOG" \
+            --config "$EVALOPS_CONFIG"
