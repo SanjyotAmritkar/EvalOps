@@ -30,6 +30,16 @@ class CaseOrigin(StrEnum):
     PROMOTED_TRACE = "promoted_trace"
 
 
+class TraceOrigin(StrEnum):
+    """Where a ProductionTrace came from.
+
+    Only real production traffic is modelled in Phase 8; the enum exists so the
+    source is an explicit, extensible marker rather than an implicit assumption.
+    """
+
+    PRODUCTION = "production"
+
+
 class ReleaseDecision(StrEnum):
     """The outcome of applying a ReleasePolicy to an EvaluationResult."""
 

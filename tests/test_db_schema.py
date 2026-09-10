@@ -60,6 +60,7 @@ _EXPECTED_TABLES = {
     "async_job",
     "judge_calibration",
     "judge_calibration_case",
+    "production_trace",
 }
 
 
@@ -169,6 +170,23 @@ def test_foreign_keys_cascade_on_delete() -> None:
         assert fk.ondelete == "CASCADE"
     release_fk = next(iter(Base.metadata.tables["experiment"].c.release_policy_id.foreign_keys))
     assert release_fk.ondelete == "SET NULL"
+
+
+def test_production_trace_references_project_and_version_and_indexes_recency() -> None:
+    table = Base.metadata.tables["production_trace"]
+    assert {fk.column.table.name for fk in table.foreign_keys} == {"project", "system_version"}
+    for fk in table.foreign_keys:
+        assert fk.ondelete == "CASCADE"
+    # per-project, per-version, and recency reads are all indexed
+    for column in ("project_id", "system_version_id", "created_at"):
+        assert table.c[column].index is True
+    checks = {str(c.name) for c in table.constraints if isinstance(c, CheckConstraint)}
+    assert checks == {
+        "ck_production_trace_latency_ms_nonneg",
+        "ck_production_trace_cost_usd_nonneg",
+    }
+    # caller context is a JSON column, never scraped fields
+    assert table.c["trace_metadata"].type.__class__.__name__ == "JSON"
 
 
 # --- a full-graph round trip ------------------------------------------------

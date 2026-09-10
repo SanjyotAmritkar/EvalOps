@@ -447,3 +447,40 @@ def judge_calibration_from_orm(row: orm.JudgeCalibration) -> domain.JudgeCalibra
             for case in row.cases
         ),
     )
+
+
+# --- ProductionTrace (Phase 8, CP 8.1) -----------------------------
+
+
+def production_trace_to_orm(value: domain.ProductionTrace) -> orm.ProductionTrace:
+    return orm.ProductionTrace(
+        id=value.id,
+        project_id=value.project_id,
+        system_version_id=value.system_version_id,
+        created_at=value.created_at,
+        input=value.input,
+        output=value.output,
+        reference_output=value.reference_output,
+        trace_metadata=dict(value.metadata),
+        latency_ms=value.latency_ms,
+        cost_usd=value.cost_usd,
+        error=value.error,
+        origin=value.origin,
+    )
+
+
+def production_trace_from_orm(row: orm.ProductionTrace) -> domain.ProductionTrace:
+    return domain.ProductionTrace(
+        id=row.id,
+        project_id=row.project_id,
+        system_version_id=row.system_version_id,
+        created_at=_aware(row.created_at),
+        input=row.input,
+        output=row.output,
+        reference_output=row.reference_output,
+        metadata=row.trace_metadata,
+        latency_ms=row.latency_ms,
+        cost_usd=row.cost_usd,
+        error=row.error,
+        origin=row.origin,
+    )

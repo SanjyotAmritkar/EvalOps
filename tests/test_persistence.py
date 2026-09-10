@@ -23,6 +23,7 @@ from evalops.db import (
     EvaluationRunRepository,
     ExperimentRepository,
     JudgeCalibrationRepository,
+    ProductionTraceRepository,
     ProjectRepository,
     RecordConflict,
     RecordNotFound,
@@ -702,3 +703,101 @@ def test_async_job_domain_invariants() -> None:
             created_at=moment,
             completed_at=moment,
         )
+
+
+# --- ProductionTrace (Phase 8, CP 8.1) --------------------------------
+
+
+def _trace(graph: Graph, **overrides: object) -> domain.ProductionTrace:
+    kwargs: dict[str, object] = {
+        "project_id": graph.project.id,
+        "system_version_id": graph.baseline.id,
+        "input": "How do I reset my password?",
+    }
+    kwargs.update(overrides)
+    return domain.ProductionTrace(**kwargs)  # type: ignore[arg-type]
+
+
+def test_production_trace_round_trip_preserves_all_fields(sessions: Sessions, graph: Graph) -> None:
+    trace = _trace(
+        graph,
+        output="Use the reset link.",
+        reference_output="Click 'Forgot password'.",
+        metadata={"conversation_id": "c-9", "turns": 3},
+        latency_ms=1234.5,
+        cost_usd=0.0021,
+    )
+    with unit_of_work(sessions) as session:
+        ProductionTraceRepository(session).add(trace)
+
+    with unit_of_work(sessions) as session:
+        loaded = ProductionTraceRepository(session).get(trace.id)
+
+    assert loaded == trace
+    assert loaded is not None
+    assert loaded.metadata == {"conversation_id": "c-9", "turns": 3}
+    assert loaded.origin is domain.TraceOrigin.PRODUCTION
+    assert loaded.created_at.tzinfo is not None
+
+
+def test_production_trace_round_trip_with_only_required_fields(
+    sessions: Sessions, graph: Graph
+) -> None:
+    trace = _trace(graph, error="provider timeout")
+    with unit_of_work(sessions) as session:
+        ProductionTraceRepository(session).add(trace)
+
+    with unit_of_work(sessions) as session:
+        loaded = ProductionTraceRepository(session).get(trace.id)
+
+    assert loaded == trace
+    assert loaded is not None
+    assert loaded.output == ""
+    assert loaded.reference_output is None
+    assert loaded.latency_ms is None
+    assert loaded.cost_usd is None
+    assert loaded.error == "provider timeout"
+
+
+def test_production_trace_get_missing_returns_none(sessions: Sessions) -> None:
+    with unit_of_work(sessions) as session:
+        assert ProductionTraceRepository(session).get("does-not-exist") is None
+
+
+def test_production_trace_list_is_scoped_to_one_project_and_ordered(
+    sessions: Sessions, graph: Graph
+) -> None:
+    other = domain.Project(name="Other")
+    other_version = _sv(other, "v1")
+    early = _trace(graph, input="first", created_at=datetime(2026, 1, 1, tzinfo=UTC))
+    late = _trace(graph, input="second", created_at=datetime(2026, 1, 2, tzinfo=UTC))
+    stranger = domain.ProductionTrace(
+        project_id=other.id, system_version_id=other_version.id, input="unrelated"
+    )
+    with unit_of_work(sessions) as session:
+        ProjectRepository(session).add(other)
+        SystemVersionRepository(session).add(other_version)
+        ProductionTraceRepository(session).add(late)
+        ProductionTraceRepository(session).add(early)
+        ProductionTraceRepository(session).add(stranger)
+
+    with unit_of_work(sessions) as session:
+        listed = ProductionTraceRepository(session).list_for_project(graph.project.id)
+
+    assert [t.id for t in listed] == [early.id, late.id]  # oldest first
+    assert stranger.id not in {t.id for t in listed}
+
+
+def test_production_trace_requires_a_real_project_and_version(
+    sessions: Sessions, graph: Graph
+) -> None:
+    dangling = domain.ProductionTrace(
+        project_id="missing", system_version_id=graph.baseline.id, input="q"
+    )
+    with pytest.raises(RecordConflict), unit_of_work(sessions) as session:
+        ProductionTraceRepository(session).add(dangling)
+
+
+def test_production_trace_negative_latency_rejected_by_domain(graph: Graph) -> None:
+    with pytest.raises(domain.DomainValidationError):
+        _trace(graph, latency_ms=-1.0)

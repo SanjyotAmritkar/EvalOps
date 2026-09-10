@@ -29,7 +29,13 @@ from sqlalchemy import (
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from evalops.db.base import ID_LENGTH, Base, JSONMap
-from evalops.domain.enums import CaseOrigin, EvaluatorFamily, JobStatus, ProviderName
+from evalops.domain.enums import (
+    CaseOrigin,
+    EvaluatorFamily,
+    JobStatus,
+    ProviderName,
+    TraceOrigin,
+)
 
 
 def _enum(py_enum: type[enum.Enum], name: str) -> Enum:
@@ -442,3 +448,35 @@ class JudgeCalibrationCase(Base):
     error: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     calibration: Mapped[JudgeCalibration] = relationship(back_populates="cases")
+
+
+class ProductionTrace(Base):
+    """One real interaction captured from a running AI system (Phase 8, CP 8.1).
+
+    A leaf table: it references a project and a system version but owns no
+    children and is not referenced by any other table yet (promotion into a
+    DatasetCase is a later checkpoint). ``trace_metadata`` is caller-supplied
+    context only -- never headers, cookies, environment, or credentials."""
+
+    __tablename__ = "production_trace"
+    __table_args__ = (
+        CheckConstraint("latency_ms IS NULL OR latency_ms >= 0.0", name="latency_ms_nonneg"),
+        CheckConstraint("cost_usd IS NULL OR cost_usd >= 0.0", name="cost_usd_nonneg"),
+    )
+
+    id: Mapped[str] = _id_column()
+    project_id: Mapped[str] = _fk("project.id")
+    system_version_id: Mapped[str] = _fk("system_version.id")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, index=True
+    )
+    input: Mapped[str] = mapped_column(Text, nullable=False)
+    output: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    reference_output: Mapped[str | None] = mapped_column(Text, nullable=True)
+    trace_metadata: Mapped[dict[str, Any]] = mapped_column(JSONMap, nullable=False, default=dict)
+    latency_ms: Mapped[float | None] = mapped_column(Float, nullable=True)
+    cost_usd: Mapped[float | None] = mapped_column(Float, nullable=True)
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    origin: Mapped[TraceOrigin] = mapped_column(
+        _enum(TraceOrigin, "trace_origin"), nullable=False, default=TraceOrigin.PRODUCTION
+    )

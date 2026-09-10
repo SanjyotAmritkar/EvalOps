@@ -230,6 +230,37 @@ metrics are CP 6.2.
 4. **Agent evaluation** — evaluates not just the final answer but the trajectory: tool selection accuracy, tool argument correctness, unnecessary tool calls, loop detection, completion rate, token usage, policy violations. A run's trajectory is stored as an ordered list of tool_call/tool_result steps.
 5. **Production trace → regression case** — a failed production trace can be promoted (`Add to regression suite`) into a new dataset version. Every future candidate must pass it. This is the flagship differentiator; build it right after the core loop is solid, before infra polish.
 
+### 7.1 Implemented: production trace foundation (Phase 8, CP 8.1)
+
+The **storage half** of level 5 is shipped; promotion, replay, and any UI are
+later checkpoints and are deliberately not built yet.
+
+`domain.ProductionTrace` is a frozen, validated value model for one real
+interaction: `project_id`, `system_version_id`, `created_at`, `input`,
+`output`, optional `reference_output`, optional free-form `metadata`, optional
+`latency_ms` / `cost_usd` / `error`, and an `origin` marker
+(`TraceOrigin.PRODUCTION`). It is **not** an observability schema — no spans,
+trace trees, OpenTelemetry types, token streams, or tool-call event graphs.
+
+Persistence is one leaf table, `production_trace` (PostgreSQL source of truth,
+Alembic migration `9f2bb314ccd0`): `project_id` / `system_version_id` /
+`created_at` indexed, `metadata` as JSON/JSONB, both FKs `ON DELETE CASCADE`,
+`latency_ms` / `cost_usd` non-negative CHECKs. `ProductionTraceRepository`
+(`add` / `get` / `list_for_project`, oldest-first) follows the existing
+repository + unit-of-work pattern; a trace is write-once, so there is no update.
+
+Ingestion is three thin FastAPI routes reusing existing patterns:
+`POST /projects/{project_id}/traces` (validates the project and the referenced
+system version exist → 404, and that the version belongs to the project → 422;
+persists; returns 201), `GET /projects/{project_id}/traces`, and
+`GET /traces/{trace_id}`. List returns persisted data only, all rows, in a
+deterministic order — no pagination, filtering, or search infrastructure.
+
+**Data handling.** Only the JSON body is read: no request headers, cookies, or
+environment are captured, `metadata` is stored exactly as supplied, and no new
+code logs trace values. There is no redaction/PII framework — callers are
+responsible for sending only data they are permitted to evaluate.
+
 ---
 
 ## 8. Statistical Rigor

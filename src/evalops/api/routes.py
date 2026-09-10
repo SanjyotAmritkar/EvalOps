@@ -32,6 +32,8 @@ from evalops.api.schemas import (
     RunResponse,
     SystemVersionCreate,
     SystemVersionRead,
+    TraceCreate,
+    TraceRead,
 )
 from evalops.calibration import calibrate_judge
 from evalops.db import (
@@ -41,6 +43,7 @@ from evalops.db import (
     EvaluationRunRepository,
     ExperimentRepository,
     JudgeCalibrationRepository,
+    ProductionTraceRepository,
     ProjectRepository,
     ReleasePolicyRepository,
     SystemVersionRepository,
@@ -67,6 +70,7 @@ release_policies = APIRouter(tags=["release-policies"])
 experiments = APIRouter(tags=["experiments"])
 jobs = APIRouter(tags=["jobs"])
 judge_calibrations = APIRouter(tags=["judge-calibrations"])
+traces = APIRouter(tags=["traces"])
 
 
 # --- projects ---------------------------------------------------------
@@ -373,6 +377,57 @@ def get_judge_calibration(calibration_id: str, session: SessionDep) -> JudgeCali
     )
 
 
+# --- production traces (Phase 8, CP 8.1) -----------------------
+
+
+@traces.post("/projects/{project_id}/traces", status_code=status.HTTP_201_CREATED)
+def create_trace(project_id: str, body: TraceCreate, session: SessionDep) -> TraceRead:
+    """Ingest one production interaction for later promotion to a regression case.
+
+    Validates that the project and the referenced system version exist (404) and
+    that the system version belongs to this project (422). Only the JSON body is
+    read -- no request headers, cookies, or environment are captured, and
+    ``metadata`` is stored exactly as supplied. Callers are responsible for
+    sending only data they are permitted to evaluate.
+    """
+    _found(ProjectRepository(session).get(project_id), "project not found")
+    system_version = _found(
+        SystemVersionRepository(session).get(body.system_version_id),
+        "system version not found",
+    )
+    if system_version.project_id != project_id:
+        # A well-formed request that is semantically invalid -- same 422 the
+        # domain-invariant handlers in ``main`` use.
+        raise HTTPException(
+            status_code=422, detail="system version does not belong to this project"
+        )
+    trace = domain.ProductionTrace(
+        project_id=project_id,
+        system_version_id=body.system_version_id,
+        input=body.input,
+        output=body.output,
+        reference_output=body.reference_output,
+        metadata=body.metadata,
+        latency_ms=body.latency_ms,
+        cost_usd=body.cost_usd,
+        error=body.error,
+    )
+    return TraceRead.of(ProductionTraceRepository(session).add(trace))
+
+
+@traces.get("/projects/{project_id}/traces")
+def list_traces(project_id: str, session: SessionDep) -> list[TraceRead]:
+    _found(ProjectRepository(session).get(project_id), "project not found")
+    return [
+        TraceRead.of(t) for t in ProductionTraceRepository(session).list_for_project(project_id)
+    ]
+
+
+@traces.get("/traces/{trace_id}")
+def get_trace(trace_id: str, session: SessionDep) -> TraceRead:
+    return TraceRead.of(_found(ProductionTraceRepository(session).get(trace_id), "trace not found"))
+
+
 ROUTERS = (
     projects,
     datasets,
@@ -381,4 +436,5 @@ ROUTERS = (
     experiments,
     jobs,
     judge_calibrations,
+    traces,
 )

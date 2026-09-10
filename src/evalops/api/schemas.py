@@ -13,7 +13,13 @@ from typing import Annotated, Any, Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 from evalops import domain
-from evalops.domain.enums import CaseOrigin, EvaluatorFamily, JobStatus, ProviderName
+from evalops.domain.enums import (
+    CaseOrigin,
+    EvaluatorFamily,
+    JobStatus,
+    ProviderName,
+    TraceOrigin,
+)
 from evalops.execution import ExecutionSpec
 from evalops.gate import GateReport
 from evalops.ollama import DEFAULT_BASE_URL, DEFAULT_TIMEOUT_SECONDS
@@ -90,6 +96,56 @@ class DatasetRead(BaseModel):
                 )
                 for case in value.cases
             ],
+        )
+
+
+# --- ProductionTrace (Phase 8, CP 8.1) -----------------------------
+
+
+class TraceCreate(_Create):
+    """Ingest one production interaction. ``metadata`` is context the caller
+    chooses to send -- the API never scrapes headers, cookies, or environment,
+    and callers are responsible for sending only data they may evaluate."""
+
+    system_version_id: str
+    input: str
+    output: str = ""
+    reference_output: str | None = None
+    metadata: dict[str, Any] = {}
+    latency_ms: float | None = None
+    cost_usd: float | None = None
+    error: str | None = None
+
+
+class TraceRead(BaseModel):
+    id: str
+    project_id: str
+    system_version_id: str
+    created_at: datetime
+    input: str
+    output: str
+    reference_output: str | None
+    metadata: dict[str, Any]
+    latency_ms: float | None
+    cost_usd: float | None
+    error: str | None
+    origin: TraceOrigin
+
+    @classmethod
+    def of(cls, value: domain.ProductionTrace) -> TraceRead:
+        return cls(
+            id=value.id,
+            project_id=value.project_id,
+            system_version_id=value.system_version_id,
+            created_at=value.created_at,
+            input=value.input,
+            output=value.output,
+            reference_output=value.reference_output,
+            metadata=dict(value.metadata),
+            latency_ms=value.latency_ms,
+            cost_usd=value.cost_usd,
+            error=value.error,
+            origin=value.origin,
         )
 
 

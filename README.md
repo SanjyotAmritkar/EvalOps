@@ -132,6 +132,13 @@ a feature is listed under **SHIPPED** only if its full path actually works today
 - **Read/write API** — a small FastAPI app (`evalops.api.main:app`) over the
   repositories: create/read/list for projects, datasets, system versions,
   release policies, and experiments. No evaluation execution through the API yet.
+- **Production trace foundation** (Phase 8, CP 8.1) — a minimal, validated
+  `ProductionTrace` model (`input` / `output` / optional reference / metadata /
+  latency / cost / error / origin), a `production_trace` PostgreSQL table
+  (indexed by project / system version / recency), and thin ingestion/read
+  endpoints: `POST` / `GET /projects/{id}/traces`, `GET /traces/{id}`. Storage
+  only — promoting a trace into a regression case, and replaying it, are later
+  checkpoints. No headers/cookies/environment are captured; no redaction.
 
 ### NOT YET SHIPPED
 
@@ -144,7 +151,8 @@ a feature is listed under **SHIPPED** only if its full path actually works today
   experiments, and the results / comparison / release-decision views, are not
   built yet
 - Statistical gating — bootstrap confidence intervals, significance, effect size
-- Production traces, RAG evaluation, agent evaluation, LLM-as-judge
+- Promoting a production trace into a regression case, and replaying it
+- RAG evaluation, agent evaluation, LLM-as-judge
 - Cloud deployment
 
 `MockProvider` is deterministic test infrastructure for offline development and

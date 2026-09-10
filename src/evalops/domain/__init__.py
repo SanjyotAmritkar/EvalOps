@@ -19,6 +19,7 @@ from evalops.domain.entities import (
     EvaluationRun,
     Experiment,
     JudgeCalibration,
+    ProductionTrace,
     Project,
     ReleasePolicy,
     SystemVersion,
@@ -29,6 +30,7 @@ from evalops.domain.enums import (
     JobStatus,
     ProviderName,
     ReleaseDecision,
+    TraceOrigin,
 )
 from evalops.domain.errors import DomainValidationError, EvalOpsError
 from evalops.domain.ids import EntityId, new_id
@@ -67,6 +69,7 @@ __all__ = [
     "MetricComparison",
     "MetricEvidence",
     "MetricKind",
+    "ProductionTrace",
     "Project",
     "ProviderClient",
     "ProviderError",
@@ -76,6 +79,7 @@ __all__ = [
     "ReleasePolicy",
     "SampleSummary",
     "SystemVersion",
+    "TraceOrigin",
     "UsageMetrics",
     "new_id",
 ]

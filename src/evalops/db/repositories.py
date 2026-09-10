@@ -295,3 +295,30 @@ class JudgeCalibrationRepository:
             )
         )
         return [mapping.judge_calibration_from_orm(row) for row in rows]
+
+
+class ProductionTraceRepository:
+    """Persist and read :class:`~evalops.domain.ProductionTrace` records.
+
+    Write-once: a trace is an immutable observation, so there is no update.
+    ``list_for_project`` returns every trace for one project, oldest first.
+    """
+
+    def __init__(self, session: Session) -> None:
+        self._session = session
+
+    def add(self, trace: domain.ProductionTrace) -> domain.ProductionTrace:
+        _add(self._session, mapping.production_trace_to_orm(trace), "ProductionTrace")
+        return trace
+
+    def get(self, trace_id: str) -> domain.ProductionTrace | None:
+        row = self._session.get(orm.ProductionTrace, trace_id)
+        return None if row is None else mapping.production_trace_from_orm(row)
+
+    def list_for_project(self, project_id: str) -> list[domain.ProductionTrace]:
+        rows = self._session.scalars(
+            select(orm.ProductionTrace)
+            .where(orm.ProductionTrace.project_id == project_id)
+            .order_by(orm.ProductionTrace.created_at, orm.ProductionTrace.id)
+        )
+        return [mapping.production_trace_from_orm(row) for row in rows]

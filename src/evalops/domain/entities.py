@@ -14,7 +14,7 @@ from types import MappingProxyType
 from typing import Any
 
 from evalops.domain._time import utcnow
-from evalops.domain.enums import CaseOrigin, JobStatus, ProviderName
+from evalops.domain.enums import CaseOrigin, JobStatus, ProviderName, TraceOrigin
 from evalops.domain.errors import DomainValidationError
 from evalops.domain.ids import new_id
 from evalops.domain.value_objects import (
@@ -428,3 +428,58 @@ class JudgeCalibration:
             raise DomainValidationError(
                 "JudgeCalibration.metrics.total must equal the number of cases"
             )
+
+
+@dataclass(frozen=True, slots=True)
+class ProductionTrace:
+    """One real interaction observed in a running AI system (Phase 8, CP 8.1).
+
+    The minimal record needed to identify a production interaction and later
+    replay it as a regression case: which project and system version produced
+    it, the ``input`` sent and the ``output`` returned, an optional
+    ``reference_output`` if a known-good answer exists, and optional
+    latency / cost / error observations. ``metadata`` is free-form context the
+    caller chooses to attach -- never scraped from headers, environment, or
+    credentials. Promotion into a DatasetCase is a later checkpoint; this
+    entity only stores the trace.
+
+    ``metadata`` is a read-only mapping: its top level cannot be mutated after
+    construction (shallow, like ``SystemVersion.parameters``).
+    """
+
+    project_id: str
+    system_version_id: str
+    input: str
+    output: str = ""
+    reference_output: str | None = None
+    metadata: Mapping[str, Any] = field(default_factory=dict)
+    latency_ms: float | None = None
+    cost_usd: float | None = None
+    error: str | None = None
+    origin: TraceOrigin = TraceOrigin.PRODUCTION
+    id: str = field(default_factory=new_id)
+    created_at: datetime = field(default_factory=utcnow)
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.origin, TraceOrigin):
+            raise DomainValidationError(
+                "ProductionTrace.origin must be a TraceOrigin member, "
+                f"got {type(self.origin).__name__}"
+            )
+        for value, label in (
+            (self.project_id, "ProductionTrace.project_id"),
+            (self.system_version_id, "ProductionTrace.system_version_id"),
+            (self.input, "ProductionTrace.input"),
+            (self.id, "ProductionTrace.id"),
+        ):
+            _require_non_empty(value, label)
+        _require_aware(self.created_at, "ProductionTrace.created_at")
+        if self.error is not None and not self.error.strip():
+            raise DomainValidationError("ProductionTrace.error must be non-blank when set")
+        for measure, label in (
+            (self.latency_ms, "ProductionTrace.latency_ms"),
+            (self.cost_usd, "ProductionTrace.cost_usd"),
+        ):
+            if measure is not None and measure < 0:
+                raise DomainValidationError(f"{label} must be non-negative, got {measure!r}")
+        object.__setattr__(self, "metadata", _read_only(self.metadata))
