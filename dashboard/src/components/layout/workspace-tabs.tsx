@@ -16,6 +16,11 @@ export function WorkspaceTabs({ projectId }: { projectId: string }) {
       active: pathname.startsWith(`${base}/datasets`),
     },
     {
+      label: "Production Traces",
+      href: `${base}/traces`,
+      active: pathname.startsWith(`${base}/traces`),
+    },
+    {
       label: "System Versions",
       href: `${base}/system-versions`,
       active: pathname.startsWith(`${base}/system-versions`),

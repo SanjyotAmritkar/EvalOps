@@ -27,6 +27,7 @@ describe("WorkspaceTabs", () => {
     for (const label of [
       "Overview",
       "Datasets",
+      "Production Traces",
       "System Versions",
       "Experiments",
       "Release Policies",

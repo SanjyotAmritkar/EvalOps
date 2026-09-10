@@ -50,6 +50,49 @@ export interface DatasetCreate {
   cases: DatasetCaseInput[];
 }
 
+// --- ProductionTrace (Phase 8) -----------------------------------------
+
+export type TraceOrigin = "production";
+
+/**
+ * One real interaction captured from a running AI system (CP 8.1).
+ * `output` is the historical system output — NOT evaluation ground truth.
+ * `reference_output` is the optional known-good answer, if one was recorded.
+ */
+export interface ProductionTrace {
+  id: string;
+  project_id: string;
+  system_version_id: string;
+  created_at: string;
+  input: string;
+  output: string;
+  reference_output: string | null;
+  metadata: Record<string, unknown>;
+  latency_ms: number | null;
+  cost_usd: number | null;
+  error: string | null;
+  origin: TraceOrigin;
+}
+
+/** Body for POST /projects/{id}/traces. Only explicit, backend-supported fields. */
+export interface TraceCreate {
+  system_version_id: string;
+  input: string;
+  output?: string;
+  reference_output?: string | null;
+  metadata?: Record<string, unknown>;
+  latency_ms?: number | null;
+  cost_usd?: number | null;
+  error?: string | null;
+}
+
+/** Body for POST /projects/{id}/trace-datasets (CP 8.2). Promotes traces, in
+ * order, into one ordinary Dataset; the traces themselves are never mutated. */
+export interface TraceDatasetCreate {
+  name: string;
+  trace_ids: string[];
+}
+
 // --- SystemVersion ------------------------------------------------------
 
 export type ProviderName = "openai" | "anthropic" | "ollama";

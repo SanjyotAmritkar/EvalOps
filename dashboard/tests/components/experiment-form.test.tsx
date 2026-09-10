@@ -80,6 +80,23 @@ describe("ExperimentForm", () => {
     expect(baseline).toHaveTextContent("ollama/llama3.2");
   });
 
+  it("preselects the dataset passed via initialDatasetId (trace-dataset handoff)", async () => {
+    stubResources();
+    render(
+      <ExperimentForm
+        projectId="p1"
+        initialDatasetId="d1"
+        onCreated={vi.fn()}
+      />,
+      { wrapper: makeWrapper() },
+    );
+
+    const dataset = (await screen.findByLabelText(
+      "Dataset",
+    )) as HTMLSelectElement;
+    await waitFor(() => expect(dataset.value).toBe("d1"));
+  });
+
   it("blocks submit when baseline and candidate are the same", async () => {
     stubResources();
     const user = userEvent.setup();

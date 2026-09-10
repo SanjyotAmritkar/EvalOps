@@ -17,16 +17,19 @@ import { useSystemVersions } from "@/lib/query/system-versions";
 export function ExperimentForm({
   projectId,
   onCreated,
+  initialDatasetId,
 }: {
   projectId: string;
   onCreated: (experiment: Experiment) => void;
+  /** Preselect this dataset (e.g. a replay dataset promoted from traces). */
+  initialDatasetId?: string;
 }) {
   const datasets = useDatasets(projectId);
   const systemVersions = useSystemVersions(projectId);
   const releasePolicies = useReleasePolicies();
   const create = useCreateExperiment(projectId);
 
-  const [datasetId, setDatasetId] = useState("");
+  const [datasetId, setDatasetId] = useState(initialDatasetId ?? "");
   const [baselineId, setBaselineId] = useState("");
   const [candidateId, setCandidateId] = useState("");
   const [policyId, setPolicyId] = useState("");

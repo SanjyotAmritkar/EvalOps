@@ -8,6 +8,11 @@ export const queryKeys = {
       ["projects", projectId, "datasets"] as const,
     detail: (id: string) => ["datasets", id] as const,
   },
+  traces: {
+    forProject: (projectId: string) =>
+      ["projects", projectId, "traces"] as const,
+    detail: (id: string) => ["traces", id] as const,
+  },
   systemVersions: {
     forProject: (projectId: string) =>
       ["projects", projectId, "system-versions"] as const,

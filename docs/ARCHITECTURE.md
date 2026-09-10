@@ -232,8 +232,8 @@ metrics are CP 6.2.
 
 ### 7.1 Implemented: production trace foundation (Phase 8, CP 8.1)
 
-The **storage half** of level 5 is shipped; a dashboard for it is a later
-checkpoint. Promotion + replay landed in CP 8.2 (§7.2).
+The **storage half** of level 5 is shipped. Promotion + replay landed in CP 8.2
+(§7.2); the dashboard workflow in CP 8.3 (§7.3).
 
 `domain.ProductionTrace` is a frozen, validated value model for one real
 interaction: `project_id`, `system_version_id`, `created_at`, `input`,
@@ -296,6 +296,38 @@ API: `POST /projects/{project_id}/trace-datasets` `{ "name", "trace_ids": [...] 
 consumed by the same `POST /projects/{id}/experiments` + run path as any other.
 No migration: `dataset_case.source_trace_id` and the `promoted_trace` origin
 already exist (CP 8.1 / Phase 0).
+
+### 7.3 Implemented: Production Traces dashboard + replay workflow (Phase 8, CP 8.3)
+
+A *Production Traces* tab in the project workspace makes the whole loop
+navigable — **production traffic → captured traces → select interactions →
+replay dataset → baseline vs candidate → release decision** — with no new
+evaluation semantics and no charts / observability dashboard.
+
+* **Browse / select** — a trace list (captured time, resolved system version,
+  input, output-or-error status, reference availability, latency, cost) with
+  per-row checkboxes. Consumes `GET /projects/{id}/traces`.
+* **Inspect** — a per-trace panel (input; *production output*, labelled
+  explicitly as historical system output and **not** evaluation ground truth;
+  optional reference; system version; metadata; latency / cost / error; trace id
+  / origin). Consumes `GET /traces/{id}`.
+* **Promote** — multi-select → a panel showing the selected count, live
+  reference coverage ("_N of M selected traces have reference outputs_"), and a
+  **non-blocking** warning when any lack references ("cases without references
+  can still be replayed, but reference-based evaluators may not be
+  applicable"). Calls `POST /projects/{id}/trace-datasets`. Production output is
+  never offered as a reference.
+* **Hand-off** — on success the panel links to the created dataset and into the
+  **existing** experiment form, preselected via
+  `/projects/{id}/experiments?dataset={id}` (the only change to that page: an
+  optional `initialDatasetId`). From there the user is on the normal
+  Dataset → Experiment → async run → statistical evidence → PASS/BLOCK path.
+* **Add trace** — a small secondary form over `POST /projects/{id}/traces`,
+  explicit fields only; the dashboard captures no headers, cookies, or
+  environment.
+
+Frontend only — the dashboard never re-derives a decision, and no backend,
+gate, or schema code changed in this checkpoint.
 
 ---
 

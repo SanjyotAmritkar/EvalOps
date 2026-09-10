@@ -147,17 +147,22 @@ a feature is listed under **SHIPPED** only if its full path actually works today
   `promoted_trace`). Atomic; production traces are never mutated. The result
   runs through the existing Dataset → Experiment → Eval Runner → statistical
   evidence → release gate flow with **no trace-specific runner or path**.
+- **Production Traces dashboard + replay workflow** (Phase 8, CP 8.3) — a
+  *Production Traces* tab in the project workspace: a browse/select trace list
+  (captured time, system version, input, output/error status, reference
+  availability, latency, cost), a trace inspector (input, production output
+  labelled *not* ground truth, reference, metadata, latency/cost/error,
+  provenance), multi-select promotion with live reference coverage
+  ("_3 of 5 selected traces have reference outputs_") and a non-blocking
+  reference-less warning, and — on success — links to the created dataset and
+  straight into the existing experiment form (`?dataset=` preselect). A small
+  secondary "Add trace" form uses the existing POST endpoint with explicit
+  fields only. No charts, no new evaluation semantics.
 
 ### NOT YET SHIPPED
 
 - Hosted provider execution — OpenAI, Anthropic
 - Evaluation execution via the API
-- Dashboard — the Next.js console in [dashboard/](dashboard/) covers browsing
-  projects, a per-project workspace (Overview, Datasets, System Versions,
-  Experiments, Release Policies), and creating / viewing datasets, system
-  versions, and release policies against the real API. Creating and running
-  experiments, and the results / comparison / release-decision views, are not
-  built yet
 - Statistical gating — bootstrap confidence intervals, significance, effect size
 - RAG evaluation, agent evaluation, LLM-as-judge
 - Cloud deployment

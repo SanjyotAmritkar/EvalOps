@@ -1,8 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { useParams, useRouter } from "next/navigation";
-import { useState } from "react";
+import { useParams, useRouter, useSearchParams } from "next/navigation";
+import { Suspense, useState } from "react";
 import { EmptyState } from "@/components/feedback/empty-state";
 import { ErrorState } from "@/components/feedback/error-state";
 import { LoadingState } from "@/components/feedback/loading-state";
@@ -18,12 +18,26 @@ import { useSystemVersions } from "@/lib/query/system-versions";
 import { ExperimentForm } from "./experiment-form";
 
 export default function ExperimentsPage() {
+  // useSearchParams() needs a Suspense boundary during prerender.
+  return (
+    <Suspense fallback={<LoadingState />}>
+      <ExperimentsPageInner />
+    </Suspense>
+  );
+}
+
+function ExperimentsPageInner() {
   const params = useParams<{ projectId: string }>();
   const projectId = String(params.projectId ?? "");
   const router = useRouter();
+  const searchParams = useSearchParams();
+
+  // A promoted replay dataset (or any deep link) can preselect its dataset:
+  // /projects/{id}/experiments?dataset={datasetId} opens the form on that dataset.
+  const preselectedDatasetId = searchParams?.get("dataset") ?? "";
 
   const experiments = useExperiments(projectId);
-  const [showForm, setShowForm] = useState(false);
+  const [showForm, setShowForm] = useState(preselectedDatasetId !== "");
 
   const wantLabels = showForm || (experiments.data?.length ?? 0) > 0;
   const datasets = useDatasets(projectId, { enabled: wantLabels });
@@ -62,6 +76,7 @@ export default function ExperimentsPage() {
       {showForm ? (
         <ExperimentForm
           projectId={projectId}
+          initialDatasetId={preselectedDatasetId || undefined}
           onCreated={(experiment) => {
             setShowForm(false);
             router.push(`${base}/${experiment.id}`);
