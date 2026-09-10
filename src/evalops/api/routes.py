@@ -33,6 +33,7 @@ from evalops.api.schemas import (
     SystemVersionCreate,
     SystemVersionRead,
     TraceCreate,
+    TraceDatasetCreate,
     TraceRead,
 )
 from evalops.calibration import calibrate_judge
@@ -52,6 +53,7 @@ from evalops.evaluators import build_evaluators
 from evalops.execution_service import execute_experiment
 from evalops.gate import evaluate_gate
 from evalops.judge import LLMJudge
+from evalops.promotion import promote_traces_to_dataset
 from evalops.worker.tasks import DispatchError, enqueue_experiment_run
 
 _T = TypeVar("_T")
@@ -124,6 +126,32 @@ def list_datasets(project_id: str, session: SessionDep) -> list[DatasetRead]:
 @datasets.get("/datasets/{dataset_id}")
 def get_dataset(dataset_id: str, session: SessionDep) -> DatasetRead:
     return DatasetRead.of(_found(DatasetRepository(session).get(dataset_id), "dataset not found"))
+
+
+@datasets.post("/projects/{project_id}/trace-datasets", status_code=status.HTTP_201_CREATED)
+def create_trace_dataset(
+    project_id: str, body: TraceDatasetCreate, session: SessionDep
+) -> DatasetRead:
+    """Promote selected production traces into a normal, replayable Dataset.
+
+    One ``DatasetCase`` per trace id, in request order, carrying the trace's
+    ``input``, its ``reference_output`` as the expected output (never its actual
+    ``output``), and its id as ``source_trace_id`` (origin ``promoted_trace``).
+    The production traces are read-only here -- nothing about them changes. The
+    result is an ordinary ``Dataset``: feed it to the existing
+    experiment / evaluation / release-gate flow, no trace-specific path.
+
+    404 if the project or any trace id is unknown; 422 for an empty selection,
+    a duplicate id, or a trace from another project; 409 if the dataset name
+    already exists for this project.
+    """
+    dataset = promote_traces_to_dataset(
+        session,
+        project_id=project_id,
+        trace_ids=body.trace_ids,
+        name=body.name,
+    )
+    return DatasetRead.of(dataset)
 
 
 # --- system versions --------------------------------------------

@@ -136,9 +136,17 @@ a feature is listed under **SHIPPED** only if its full path actually works today
   `ProductionTrace` model (`input` / `output` / optional reference / metadata /
   latency / cost / error / origin), a `production_trace` PostgreSQL table
   (indexed by project / system version / recency), and thin ingestion/read
-  endpoints: `POST` / `GET /projects/{id}/traces`, `GET /traces/{id}`. Storage
-  only — promoting a trace into a regression case, and replaying it, are later
-  checkpoints. No headers/cookies/environment are captured; no redaction.
+  endpoints: `POST` / `GET /projects/{id}/traces`, `GET /traces/{id}`. No
+  headers/cookies/environment are captured; no redaction.
+- **Trace → replayable regression dataset** (Phase 8, CP 8.2) — one backend
+  operation (`evalops.promotion.promote_traces_to_dataset`) and one endpoint,
+  `POST /projects/{id}/trace-datasets` `{ "name", "trace_ids": [...] }`, that
+  promote selected traces into an **ordinary `Dataset`** — one `DatasetCase`
+  per trace, in request order, carrying `input`, the recorded reference as the
+  expected output (never `trace.output`), and `source_trace_id` (origin
+  `promoted_trace`). Atomic; production traces are never mutated. The result
+  runs through the existing Dataset → Experiment → Eval Runner → statistical
+  evidence → release gate flow with **no trace-specific runner or path**.
 
 ### NOT YET SHIPPED
 
@@ -151,7 +159,6 @@ a feature is listed under **SHIPPED** only if its full path actually works today
   experiments, and the results / comparison / release-decision views, are not
   built yet
 - Statistical gating — bootstrap confidence intervals, significance, effect size
-- Promoting a production trace into a regression case, and replaying it
 - RAG evaluation, agent evaluation, LLM-as-judge
 - Cloud deployment
 

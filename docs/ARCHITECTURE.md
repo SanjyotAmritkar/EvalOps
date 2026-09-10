@@ -232,8 +232,8 @@ metrics are CP 6.2.
 
 ### 7.1 Implemented: production trace foundation (Phase 8, CP 8.1)
 
-The **storage half** of level 5 is shipped; promotion, replay, and any UI are
-later checkpoints and are deliberately not built yet.
+The **storage half** of level 5 is shipped; a dashboard for it is a later
+checkpoint. Promotion + replay landed in CP 8.2 (§7.2).
 
 `domain.ProductionTrace` is a frozen, validated value model for one real
 interaction: `project_id`, `system_version_id`, `created_at`, `input`,
@@ -260,6 +260,42 @@ deterministic order — no pagination, filtering, or search infrastructure.
 environment are captured, `metadata` is stored exactly as supplied, and no new
 code logs trace values. There is no redaction/PII framework — callers are
 responsible for sending only data they are permitted to evaluate.
+
+### 7.2 Implemented: trace → replayable regression dataset (Phase 8, CP 8.2)
+
+Selected production traces are promoted into an **ordinary `Dataset`** so real
+interactions replay through the *existing* pipeline. There is **no second
+runner and no trace-specific evaluation path**:
+
+```
+ProductionTrace ──promote──▶ DatasetCase(source_trace_id, origin=promoted_trace)
+                             └─▶ Dataset ─▶ Experiment ─▶ Eval Runner
+                                          ─▶ paired-bootstrap evidence ─▶ release gate
+```
+
+One backend operation, `evalops.promotion.promote_traces_to_dataset(session, *,
+project_id, trace_ids, name)`. It builds one `Dataset` (version 1) and one
+`DatasetCase` per trace, **in request order**, mapping
+`trace.input → DatasetCase.input`, `trace.reference_output →
+DatasetCase.expected_output`, `trace.id → DatasetCase.source_trace_id`, origin
+`CaseOrigin.PROMOTED_TRACE`. `trace.output` is **never** used as ground truth:
+a trace with no reference yields `expected_output=None` (the `DatasetCase`
+model does not require one); if it ever did, the resulting
+`DomainValidationError` propagates and the whole promotion rolls back — the
+conflict is reported, not faked.
+
+Validation: non-empty selection, no duplicate ids, every trace exists (→ 404),
+every trace belongs to the project (→ 422). The `Dataset` + all cases are one
+flush inside the caller's unit of work, so any failure is atomic and every
+`ProductionTrace` row is left byte-for-byte unchanged (promotion is read-only
+over traces). A repeated dataset name is a `RecordConflict` (409).
+
+API: `POST /projects/{project_id}/trace-datasets` `{ "name", "trace_ids": [...] }`
+→ **201** with the **normal `DatasetRead`** (cases carry `source_trace_id` and
+`origin`). No trace-specific evaluation endpoint — the promoted dataset is
+consumed by the same `POST /projects/{id}/experiments` + run path as any other.
+No migration: `dataset_case.source_trace_id` and the `promoted_trace` origin
+already exist (CP 8.1 / Phase 0).
 
 ---
 

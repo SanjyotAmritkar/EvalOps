@@ -62,6 +62,16 @@ class DatasetCreate(_Create):
     cases: list[DatasetCaseCreate]
 
 
+class TraceDatasetCreate(_Create):
+    """Promote production traces into a replayable regression Dataset (CP 8.2).
+
+    One DatasetCase per trace id, in this order. The traces are read-only --
+    promotion never mutates them."""
+
+    name: str
+    trace_ids: Annotated[list[str], Field(min_length=1)]
+
+
 class DatasetCaseRead(BaseModel):
     id: str
     input: str
