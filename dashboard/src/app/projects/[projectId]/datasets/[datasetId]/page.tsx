@@ -1,5 +1,6 @@
 "use client";
 
+import { Fragment } from "react";
 import { useParams } from "next/navigation";
 import { ErrorState } from "@/components/feedback/error-state";
 import { LoadingState } from "@/components/feedback/loading-state";
@@ -15,6 +16,7 @@ import { TBody, TD, TH, THead, TR, Table } from "@/components/ui/table";
 import { apiErrorMessage, isNotFound } from "@/lib/api/errors";
 import { formatDateTime } from "@/lib/format";
 import { useDataset } from "@/lib/query/datasets";
+import { CaseExpectations } from "../case-expectations";
 
 export default function DatasetDetailPage() {
   const params = useParams<{ projectId: string; datasetId: string }>();
@@ -92,42 +94,57 @@ export default function DatasetDetailPage() {
             </TR>
           </THead>
           <TBody>
-            {d.cases.map((testCase, index) => (
-              <TR key={testCase.id}>
-                <TD className="text-right tabular-nums text-fg-subtle">
-                  {index + 1}
-                </TD>
-                <TD>
-                  <pre className="whitespace-pre-wrap break-words font-mono text-[13px] text-fg">
-                    {testCase.input}
-                  </pre>
-                </TD>
-                <TD>
-                  {testCase.expected_output === null ||
-                  testCase.expected_output === "" ? (
-                    <span className="text-fg-subtle">—</span>
-                  ) : (
-                    <pre className="whitespace-pre-wrap break-words font-mono text-[13px] text-fg">
-                      {testCase.expected_output}
-                    </pre>
-                  )}
-                </TD>
-                <TD>
-                  <div className="flex flex-col gap-1">
-                    <Badge tone="neutral">
-                      {testCase.origin === "promoted_trace"
-                        ? "promoted"
-                        : "authored"}
-                    </Badge>
-                    {testCase.source_trace_id ? (
-                      <code className="font-mono text-[11px] text-fg-subtle">
-                        {testCase.source_trace_id}
-                      </code>
-                    ) : null}
-                  </div>
-                </TD>
-              </TR>
-            ))}
+            {d.cases.map((testCase, index) => {
+              const hasExpectations =
+                (testCase.expected_retrieval_ids?.length ?? 0) > 0 ||
+                (testCase.expected_tool_calls?.length ?? 0) > 0;
+              return (
+                <Fragment key={testCase.id}>
+                  <TR className={hasExpectations ? "border-b-0" : undefined}>
+                    <TD className="text-right tabular-nums text-fg-subtle">
+                      {index + 1}
+                    </TD>
+                    <TD>
+                      <pre className="whitespace-pre-wrap break-words font-mono text-[13px] text-fg">
+                        {testCase.input}
+                      </pre>
+                    </TD>
+                    <TD>
+                      {testCase.expected_output === null ||
+                      testCase.expected_output === "" ? (
+                        <span className="text-fg-subtle">—</span>
+                      ) : (
+                        <pre className="whitespace-pre-wrap break-words font-mono text-[13px] text-fg">
+                          {testCase.expected_output}
+                        </pre>
+                      )}
+                    </TD>
+                    <TD>
+                      <div className="flex flex-col gap-1">
+                        <Badge tone="neutral">
+                          {testCase.origin === "promoted_trace"
+                            ? "promoted"
+                            : "authored"}
+                        </Badge>
+                        {testCase.source_trace_id ? (
+                          <code className="font-mono text-[11px] text-fg-subtle">
+                            {testCase.source_trace_id}
+                          </code>
+                        ) : null}
+                      </div>
+                    </TD>
+                  </TR>
+                  {hasExpectations ? (
+                    <TR className="border-t-0">
+                      <TD />
+                      <TD colSpan={3} className="pt-0">
+                        <CaseExpectations testCase={testCase} />
+                      </TD>
+                    </TR>
+                  ) : null}
+                </Fragment>
+              );
+            })}
           </TBody>
         </Table>
       </section>

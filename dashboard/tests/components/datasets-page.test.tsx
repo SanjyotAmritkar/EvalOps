@@ -119,4 +119,59 @@ describe("DatasetsPage", () => {
       await screen.findByText(/already exists in this project/i),
     ).toBeInTheDocument();
   });
+
+  it("creates a dataset with RAG and agent labels from the example snippets", async () => {
+    const created = { ...DATASET, id: "d3", name: "rag-agent-set" };
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse([]))
+      .mockResolvedValueOnce(jsonResponse(created, 201))
+      .mockResolvedValue(jsonResponse([created]));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const user = userEvent.setup();
+    render(<DatasetsPage />, { wrapper: makeWrapper() });
+
+    await screen.findByText("No datasets yet");
+    await user.click(screen.getAllByRole("button", { name: /new dataset/i })[0]!);
+    await user.type(screen.getByLabelText("Name"), "rag-agent-set");
+
+    // the RAG snippet button fills the JSONL box with retrieval labels
+    await user.click(screen.getByRole("button", { name: "RAG (retrieval)" }));
+    expect(screen.getByText(/2 cases parsed/)).toBeInTheDocument();
+
+    // then paste an explicit RAG + agent mix
+    const jsonl = screen.getByLabelText("Cases (JSONL)");
+    await user.clear(jsonl);
+    await user.click(jsonl);
+    await user.paste(
+      '{"input": "q1", "expected_retrieval_ids": ["kb-1"]}\n{"input": "q2", "expected_tool_calls": [{"name": "search", "arguments": {"q": "x"}}, {"name": "done"}]}',
+    );
+
+    const submit = screen.getByRole("button", { name: "Create dataset" });
+    await waitFor(() => expect(submit).toBeEnabled());
+    await user.click(submit);
+
+    expect(
+      await screen.findByRole("link", { name: "rag-agent-set" }),
+    ).toBeInTheDocument();
+
+    const post = fetchMock.mock.calls.find(
+      (call) => (call[1] as RequestInit | undefined)?.method === "POST",
+    );
+    expect(JSON.parse((post?.[1] as RequestInit).body as string)).toEqual({
+      name: "rag-agent-set",
+      version: 1,
+      cases: [
+        { input: "q1", expected_retrieval_ids: ["kb-1"] },
+        {
+          input: "q2",
+          expected_tool_calls: [
+            { name: "search", arguments: { q: "x" } },
+            { name: "done" },
+          ],
+        },
+      ],
+    });
+  });
 });

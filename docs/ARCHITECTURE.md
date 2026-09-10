@@ -452,6 +452,48 @@ columns, `NOT NULL DEFAULT '[]'`. `EvaluationRunRead.tool_calls` and
 dataset representations; no new endpoints; `GET /runs` faithfully reconstructs
 an agent execution after a refresh.
 
+### 7.6 Implemented: RAG + agent dashboard integration (Phase 9, CP 9.3)
+
+The complete Phase 9 workflow is now navigable in the existing console — **no
+new pages, no RAG/agent-specific experiment or result view, no metric computed
+in the frontend**:
+
+```
+External AI system
+  -> final answer
+  -> retrieval evidence (optional)   ── captured by the provider execution result
+  -> tool-call evidence  (optional)
+  -> EvalOps evaluators  (chosen in the existing experiment run form)
+  -> graded (mean_score) + pass-rate metrics
+  -> paired statistical evidence     ── all backend-computed
+  -> release gate                    ── existing ReleaseDecision component
+```
+
+* **Dataset UX** — the JSONL create form and parser accept the optional
+  `expected_retrieval_ids` (RAG) and `expected_tool_calls` (agent, ordered
+  `{name, arguments?}`) keys, with one-click example snippets for the three
+  case shapes. Plain text-only cases are unchanged. Dataset detail shows the
+  authored expectations per case behind progressive disclosure ("Retrieval
+  expectations", "Tool expectations"), never overwhelming the input/reference.
+* **Evaluator config** — the run form offers the shipped deterministic
+  evaluators grouped Text / RAG / Agent, exposes exactly the backend
+  thresholds (`min_recall` / `min_precision` / `min_groundedness` / `min_score`,
+  blank = backend default), and flags which need authored labels. The backend
+  stays authoritative — a label mismatch surfaces as its 422.
+* **Run evidence** — each persisted run row expands to its evaluator scores
+  and, only when present, a labelled **"Retrieved context"** (rank / id / score
+  / content) and **"Tool trajectory"** (ordered name, ok/fail, arguments,
+  result, error, shown as compact readable blocks, not a raw JSON dump).
+  Text-only runs show only their scores. Copy states retrieval evidence is not
+  ground truth and a tool trajectory does not prove task correctness.
+* **Metrics + decision** — the existing `ReleaseDecision` renders the 14
+  RAG/agent metric names with human-readable labels and a one-line legend
+  distinguishing *pass rate* (fraction of checks meeting the threshold) from
+  *mean score* (average graded score). Weak/inconclusive evidence semantics are
+  untouched.
+
+Production-trace replay datasets and every prior workflow are unaffected.
+
 ---
 
 ## 8. Statistical Rigor
@@ -694,7 +736,7 @@ auto-gating are out of scope.
 | 6 | Judge calibration: build the labeled calibration set, compute agreement metrics | `calibration_report.json` exists and is referenced in the README |
 | 7 | GitHub CI gate: PR-triggered `evalops run --json` workflow, PR step summary, non-zero exit on a real BLOCK | A deliberately bad candidate turns a GitHub Actions check red |
 | 8 | Production trace feedback loop: trace ingestion, trace viewer, promote-to-regression, dataset versioning | A traced failure becomes a permanent regression case |
-| 9 | RAG + agent evaluation, extending the existing evaluator abstraction | No separate evaluation subsystem was built to support this |
+| 9 | RAG + agent evaluation, extending the existing evaluator abstraction (shipped: CP 9.1 RAG, CP 9.2 agent + generic `mean_score`, CP 9.3 dashboard) | No separate evaluation subsystem was built to support this |
 | 10 | Polish: structured logging → OpenTelemetry, Grafana if useful, one real cloud deployment, failure clustering as a stretch feature | `docker compose up` reproduces the full system locally |
 
 ---

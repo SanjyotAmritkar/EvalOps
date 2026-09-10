@@ -8,7 +8,6 @@ import { TextField } from "@/components/ui/text-field";
 import { ApiError } from "@/lib/api/client";
 import { apiErrorMessage } from "@/lib/api/errors";
 import {
-  EVALUATOR_TYPES,
   OLLAMA_DEFAULT_BASE_URL,
   OLLAMA_DEFAULT_TIMEOUT_SECONDS,
   type AsyncJob,
@@ -17,6 +16,9 @@ import {
 } from "@/lib/api/types";
 import { useRunExperimentAsync } from "@/lib/query/experiments";
 import {
+  AGENT_EVALUATOR_TYPES,
+  EVALUATOR_META,
+  RAG_EVALUATOR_TYPES,
   buildRunRequest,
   defaultCaseSensitive,
   isRunConfigValid,
@@ -25,12 +27,14 @@ import {
   type RunConfigState,
 } from "@/lib/run-config";
 
-const EVALUATOR_HELP: Record<EvaluatorType, string> = {
-  exact_match:
-    "Passes when the output equals each case's expected output.",
-  contains:
-    "Passes when the output contains each case's expected output.",
-  regex_match: "Passes when the pattern is found in the output (re.search).",
+const TEXT_TYPES: EvaluatorType[] = ["exact_match", "contains", "regex_match"];
+
+const NEEDS_HINT: Record<string, string> = {
+  reference: "Needs an expected output on every case.",
+  retrieval_ids: "Needs expected_retrieval_ids on every case.",
+  tool_names: "Needs expected_tool_calls on every case.",
+  tool_args:
+    "Needs expected_tool_calls with explicit arguments on every case.",
 };
 
 export function RunForm({
@@ -56,7 +60,17 @@ export function RunForm({
   const busy = run.isPending || disabled;
   const canRun = isRunConfigValid(errors) && !busy;
 
-  function patchRow(index: number, patch: Partial<RunConfigState["evaluators"][number]>) {
+  const hasRag = state.evaluators.some((row) =>
+    RAG_EVALUATOR_TYPES.includes(row.type),
+  );
+  const hasAgent = state.evaluators.some((row) =>
+    AGENT_EVALUATOR_TYPES.includes(row.type),
+  );
+
+  function patchRow(
+    index: number,
+    patch: Partial<RunConfigState["evaluators"][number]>,
+  ) {
     setState((current) => ({
       ...current,
       evaluators: current.evaluators.map((row, i) =>
@@ -75,6 +89,7 @@ export function RunForm({
               type,
               caseSensitive: defaultCaseSensitive(type),
               pattern: type === "regex_match" ? row.pattern : "",
+              threshold: EVALUATOR_META[type].thresholdDefault ?? "",
             }
           : row,
       ),
@@ -153,88 +168,152 @@ export function RunForm({
         <fieldset className="flex flex-col gap-3">
           <legend className="text-sm font-medium text-fg">Evaluators</legend>
           <p className="text-xs text-fg-subtle">
-            At least one. Each is scored per run; its pass-rate becomes a metric
-            named after the evaluator.
+            At least one. Each is scored per run; the backend produces both a{" "}
+            <span className="font-medium text-fg">pass rate</span> (fraction of
+            checks meeting the threshold) and a{" "}
+            <span className="font-medium text-fg">mean score</span> (average
+            graded score) metric named after it.
           </p>
 
+          {hasRag ? (
+            <p className="rounded-md border border-border bg-surface-raised px-3 py-2 text-xs text-fg-muted">
+              <span className="font-medium text-fg">RAG evaluation:</span>{" "}
+              evaluate what the system retrieved as well as what it answered.
+            </p>
+          ) : null}
+          {hasAgent ? (
+            <p className="rounded-md border border-border bg-surface-raised px-3 py-2 text-xs text-fg-muted">
+              <span className="font-medium text-fg">Agent evaluation:</span>{" "}
+              evaluate tool selection, arguments, execution success, and
+              trajectory — not just the final text.
+            </p>
+          ) : null}
+
           <div className="flex flex-col gap-3">
-            {state.evaluators.map((row, index) => (
-              <div
-                key={index}
-                className="flex flex-col gap-3 rounded-md border border-border p-3"
-              >
-                <div className="grid gap-3 sm:grid-cols-2">
-                  <Select
-                    label="Type"
-                    value={row.type}
-                    onChange={(event) =>
-                      changeType(index, event.target.value as EvaluatorType)
-                    }
-                  >
-                    {EVALUATOR_TYPES.map((type) => (
-                      <option key={type} value={type}>
-                        {type}
-                      </option>
-                    ))}
-                  </Select>
-                  <TextField
-                    label="Name (optional)"
-                    placeholder={row.type}
-                    value={row.name}
-                    onChange={(event) =>
-                      patchRow(index, { name: event.target.value })
-                    }
-                    autoComplete="off"
-                  />
-                </div>
-
-                {row.type === "regex_match" ? (
-                  <TextField
-                    label="Pattern"
-                    placeholder="e.g. ^\\s*yes"
-                    value={row.pattern}
-                    onChange={(event) =>
-                      patchRow(index, { pattern: event.target.value })
-                    }
-                    error={errors.rows[index] ?? undefined}
-                    autoComplete="off"
-                  />
-                ) : (
-                  <label className="flex items-center gap-2 text-sm text-fg">
-                    <input
-                      type="checkbox"
-                      checked={row.caseSensitive}
+            {state.evaluators.map((row, index) => {
+              const meta = EVALUATOR_META[row.type];
+              return (
+                <div
+                  key={index}
+                  className="flex flex-col gap-3 rounded-md border border-border p-3"
+                >
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <Select
+                      label="Type"
+                      value={row.type}
                       onChange={(event) =>
-                        patchRow(index, { caseSensitive: event.target.checked })
+                        changeType(index, event.target.value as EvaluatorType)
                       }
-                      className="h-4 w-4 rounded border-border accent-accent"
+                    >
+                      <optgroup label="Text">
+                        {TEXT_TYPES.map((type) => (
+                          <option key={type} value={type}>
+                            {type}
+                          </option>
+                        ))}
+                      </optgroup>
+                      <optgroup label="RAG (retrieval)">
+                        {RAG_EVALUATOR_TYPES.map((type) => (
+                          <option key={type} value={type}>
+                            {type}
+                          </option>
+                        ))}
+                      </optgroup>
+                      <optgroup label="Agent (tools)">
+                        {AGENT_EVALUATOR_TYPES.map((type) => (
+                          <option key={type} value={type}>
+                            {type}
+                          </option>
+                        ))}
+                      </optgroup>
+                    </Select>
+                    <TextField
+                      label="Name (optional)"
+                      placeholder={row.type}
+                      value={row.name}
+                      onChange={(event) =>
+                        patchRow(index, { name: event.target.value })
+                      }
+                      autoComplete="off"
                     />
-                    Case sensitive
-                  </label>
-                )}
+                  </div>
 
-                <div className="flex items-center justify-between gap-2">
-                  <p className="text-xs text-fg-subtle">
-                    {EVALUATOR_HELP[row.type]}
-                  </p>
-                  <button
-                    type="button"
-                    onClick={() =>
-                      setState((current) => ({
-                        ...current,
-                        evaluators: current.evaluators.filter(
-                          (_, i) => i !== index,
-                        ),
-                      }))
-                    }
-                    disabled={state.evaluators.length === 1}
-                    className="shrink-0 text-xs font-medium text-fg-subtle transition-colors hover:text-fg disabled:opacity-40"
-                  >
-                    Remove
-                  </button>
+                  {row.type === "regex_match" ? (
+                    <TextField
+                      label="Pattern"
+                      placeholder="e.g. ^\\s*yes"
+                      value={row.pattern}
+                      onChange={(event) =>
+                        patchRow(index, { pattern: event.target.value })
+                      }
+                      error={errors.rows[index] ?? undefined}
+                      autoComplete="off"
+                    />
+                  ) : row.type === "exact_match" || row.type === "contains" ? (
+                    <label className="flex items-center gap-2 text-sm text-fg">
+                      <input
+                        type="checkbox"
+                        checked={row.caseSensitive}
+                        onChange={(event) =>
+                          patchRow(index, {
+                            caseSensitive: event.target.checked,
+                          })
+                        }
+                        className="h-4 w-4 rounded border-border accent-accent"
+                      />
+                      Case sensitive
+                    </label>
+                  ) : null}
+
+                  {meta.thresholdKey ? (
+                    <TextField
+                      label={`${meta.thresholdLabel} (pass threshold, 0–1)`}
+                      type="number"
+                      min={0}
+                      max={1}
+                      step={0.05}
+                      value={row.threshold}
+                      onChange={(event) =>
+                        patchRow(index, { threshold: event.target.value })
+                      }
+                      hint={`Leave blank for the backend default (${meta.thresholdDefault}).`}
+                      error={
+                        row.type !== "regex_match"
+                          ? (errors.rows[index] ?? undefined)
+                          : undefined
+                      }
+                      autoComplete="off"
+                    />
+                  ) : null}
+
+                  <div className="flex items-center justify-between gap-2">
+                    <p className="text-xs text-fg-subtle">
+                      {meta.help}
+                      {meta.needs !== "none" ? (
+                        <span className="ml-1 font-medium text-fg-muted">
+                          {NEEDS_HINT[meta.needs]}
+                        </span>
+                      ) : null}
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setState((current) => ({
+                          ...current,
+                          evaluators: current.evaluators.filter(
+                            (_, i) => i !== index,
+                          ),
+                        }))
+                      }
+                      disabled={state.evaluators.length === 1}
+                      className="shrink-0 text-xs font-medium text-fg-subtle transition-colors hover:text-fg disabled:opacity-40"
+                    >
+                      Remove
+                    </button>
+                  </div>
                 </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
 
           <button
@@ -254,6 +333,10 @@ export function RunForm({
           {errors.evaluators ? (
             <p className="text-xs text-block">{errors.evaluators}</p>
           ) : null}
+          <p className="text-xs text-fg-subtle">
+            The backend validates labels and rejects a mismatch (422) — this
+            guidance only helps avoid the obvious cases.
+          </p>
         </fieldset>
       </fieldset>
 

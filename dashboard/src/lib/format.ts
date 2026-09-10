@@ -54,7 +54,11 @@ export function shortId(id: string): string {
 export function formatMetricValue(metric: string, value: number): string {
   if (metric.startsWith("cost_usd.")) return `$${value.toFixed(4)}`;
   if (metric.startsWith("latency_ms.")) return `${value.toFixed(1)} ms`;
-  if (metric === "success_rate" || metric.endsWith(".pass_rate")) {
+  if (
+    metric === "success_rate" ||
+    metric.endsWith(".pass_rate") ||
+    metric.endsWith(".mean_score")
+  ) {
     return value.toFixed(3);
   }
   return String(Number(value.toFixed(4)));

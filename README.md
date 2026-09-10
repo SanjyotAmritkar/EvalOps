@@ -188,6 +188,22 @@ a feature is listed under **SHIPPED** only if its full path actually works today
   aggregation / paired-bootstrap / gate path, no agent-specific logic. One
   narrow additive migration; `pass_rate` metrics and text-only / RAG runs
   unchanged.
+- **RAG + agent evaluation dashboard** (Phase 9, CP 9.3) — the full Phase 9
+  workflow in the existing console, no new pages: the dataset JSONL form/parser
+  accept `expected_retrieval_ids` and ordered `expected_tool_calls`
+  (`{name, arguments?}`) with example snippets, and dataset detail shows those
+  expectations per case behind progressive disclosure; the experiment run form
+  offers the shipped RAG (`retrieval_recall` / `context_precision` /
+  `groundedness`) and agent (`tool_selection` / `tool_arguments` /
+  `tool_success` / `tool_trajectory`) evaluators grouped by family, with only
+  the backend thresholds (`min_recall` / `min_precision` / `min_groundedness` /
+  `min_score`) and a "which need labels" hint; each persisted run row expands to
+  its scores and, when present, a labelled **Retrieved context** and ordered
+  **Tool trajectory** (readable blocks, not raw JSON); and `ReleaseDecision`
+  renders human-readable RAG/agent metric names plus a *pass rate* vs *mean
+  score* legend. No metric, statistic, or gate outcome is computed in the
+  frontend — the backend stays authoritative. Text-only datasets/runs and
+  production-trace replay are unchanged.
 
 ### NOT YET SHIPPED
 

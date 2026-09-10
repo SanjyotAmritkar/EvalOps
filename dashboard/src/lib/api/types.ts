@@ -20,12 +20,28 @@ export interface ProjectCreate {
 
 export type CaseOrigin = "authored" | "promoted_trace";
 
+/** Authored expected tool call (Phase 9, CP 9.2). `arguments === null` means
+ * only the tool name is expected here. */
+export interface ExpectedToolCall {
+  name: string;
+  arguments: Record<string, unknown> | null;
+}
+
+export interface ExpectedToolCallInput {
+  name: string;
+  arguments?: Record<string, unknown> | null;
+}
+
 export interface DatasetCase {
   id: string;
   input: string;
   expected_output: string | null;
   origin: CaseOrigin;
   source_trace_id: string | null;
+  /** RAG ground truth (CP 9.1): relevant document/chunk ids. */
+  expected_retrieval_ids: string[];
+  /** Agent ground truth (CP 9.2): the expected ordered tool trajectory. */
+  expected_tool_calls: ExpectedToolCall[];
 }
 
 export interface Dataset {
@@ -42,6 +58,8 @@ export interface DatasetCaseInput {
   expected_output?: string;
   origin?: CaseOrigin;
   source_trace_id?: string;
+  expected_retrieval_ids?: string[];
+  expected_tool_calls?: ExpectedToolCallInput[];
 }
 
 export interface DatasetCreate {
@@ -168,12 +186,31 @@ export interface ExperimentCreate {
 
 export type ExecutionBackend = "mock" | "ollama";
 
-export type EvaluatorType = "exact_match" | "contains" | "regex_match";
+/** Deterministic evaluator types the backend ships (Phase 1 + CP 9.1 + CP 9.2).
+ * `llm_judge` is configured elsewhere and is not offered by the run form. */
+export type EvaluatorType =
+  | "exact_match"
+  | "contains"
+  | "regex_match"
+  | "retrieval_recall"
+  | "context_precision"
+  | "groundedness"
+  | "tool_selection"
+  | "tool_arguments"
+  | "tool_success"
+  | "tool_trajectory";
 
 export const EVALUATOR_TYPES: readonly EvaluatorType[] = [
   "exact_match",
   "contains",
   "regex_match",
+  "retrieval_recall",
+  "context_precision",
+  "groundedness",
+  "tool_selection",
+  "tool_arguments",
+  "tool_success",
+  "tool_trajectory",
 ];
 
 export const OLLAMA_DEFAULT_BASE_URL = "http://localhost:11434";
@@ -185,6 +222,12 @@ export interface EvaluatorSpec {
   name?: string;
   case_sensitive?: boolean;
   pattern?: string;
+  // RAG evaluator pass thresholds (CP 9.1).
+  min_recall?: number;
+  min_precision?: number;
+  min_groundedness?: number;
+  // Agent evaluator pass threshold (CP 9.2).
+  min_score?: number;
 }
 
 export interface ExecutionOptions {
@@ -290,6 +333,23 @@ export interface EvaluatorScore {
   passed: boolean | null;
 }
 
+/** One document/chunk an external RAG system reported retrieving (CP 9.1). */
+export interface RetrievedItem {
+  doc_id: string;
+  content: string;
+  rank: number;
+  score: number | null;
+}
+
+/** One tool invocation an external agent reported making (CP 9.2). */
+export interface ToolCall {
+  name: string;
+  arguments: Record<string, unknown>;
+  result: unknown;
+  ok: boolean;
+  error: string | null;
+}
+
 export interface EvaluationRun {
   id: string;
   system_version_id: string;
@@ -299,6 +359,10 @@ export interface EvaluationRun {
   error: string | null;
   usage: Usage;
   scores: EvaluatorScore[];
+  /** RAG retrieval evidence, empty for text-only runs (CP 9.1). */
+  retrieval: RetrievedItem[];
+  /** Agent tool-call evidence, empty for non-agent runs (CP 9.2). */
+  tool_calls: ToolCall[];
   created_at: string;
 }
 

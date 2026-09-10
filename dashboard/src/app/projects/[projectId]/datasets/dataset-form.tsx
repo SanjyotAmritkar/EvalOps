@@ -10,8 +10,14 @@ import { apiErrorMessage } from "@/lib/api/errors";
 import { parseCasesJsonl } from "@/lib/jsonl";
 import { useCreateDataset } from "@/lib/query/datasets";
 
-const EXAMPLE = `{"input": "What is 2 + 2?", "expected_output": "4"}
+const EXAMPLE_TEXT = `{"input": "What is 2 + 2?", "expected_output": "4"}
 {"input": "Capital of France?", "expected_output": "Paris"}`;
+
+const EXAMPLE_RAG = `{"input": "reset my password", "expected_output": "Use the reset link", "expected_retrieval_ids": ["kb-42", "kb-43"]}
+{"input": "refund policy", "expected_retrieval_ids": ["policy-7"]}`;
+
+const EXAMPLE_AGENT = `{"input": "book a flight to Paris", "expected_tool_calls": [{"name": "search_flights", "arguments": {"dest": "PAR"}}, {"name": "book"}]}
+{"input": "what's the weather", "expected_tool_calls": [{"name": "get_weather"}]}`;
 
 export function DatasetForm({
   projectId,
@@ -89,12 +95,12 @@ export function DatasetForm({
           label="Cases (JSONL)"
           mono
           rows={8}
-          placeholder={EXAMPLE}
+          placeholder={EXAMPLE_TEXT}
           value={jsonl}
           onChange={(event) => setJsonl(event.target.value)}
           disabled={create.isPending}
           hint={
-            'One JSON object per line. "input" is required; "expected_output", "origin" ("authored" | "promoted_trace") and "source_trace_id" are optional.'
+            'One JSON object per line. "input" is required. Optional, add only where relevant: "expected_output" (reference answer) · "expected_retrieval_ids": [string] (RAG relevant chunks) · "expected_tool_calls": [{ "name", "arguments"? }] (agent trajectory) · "origin" / "source_trace_id".'
           }
           error={
             firstError
@@ -104,12 +110,27 @@ export function DatasetForm({
         />
 
         <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-fg-subtle">
+          <span className="font-medium text-fg-subtle">Insert example:</span>
           <button
             type="button"
             className="text-accent transition-colors hover:underline"
-            onClick={() => setJsonl(EXAMPLE)}
+            onClick={() => setJsonl(EXAMPLE_TEXT)}
           >
-            Insert example
+            text-only
+          </button>
+          <button
+            type="button"
+            className="text-accent transition-colors hover:underline"
+            onClick={() => setJsonl(EXAMPLE_RAG)}
+          >
+            RAG (retrieval)
+          </button>
+          <button
+            type="button"
+            className="text-accent transition-colors hover:underline"
+            onClick={() => setJsonl(EXAMPLE_AGENT)}
+          >
+            agent (tools)
           </button>
           <span>
             {parsed.cases.length} case

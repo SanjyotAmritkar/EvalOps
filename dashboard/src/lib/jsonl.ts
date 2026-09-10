@@ -1,4 +1,8 @@
-import type { CaseOrigin, DatasetCaseInput } from "@/lib/api/types";
+import type {
+  CaseOrigin,
+  DatasetCaseInput,
+  ExpectedToolCallInput,
+} from "@/lib/api/types";
 
 export interface JsonlError {
   line: number;
@@ -79,8 +83,68 @@ export function parseCasesJsonl(text: string): JsonlParseResult {
       parsed.source_trace_id = obj.source_trace_id;
     }
 
+    if (obj.expected_retrieval_ids !== undefined) {
+      if (
+        !Array.isArray(obj.expected_retrieval_ids) ||
+        !obj.expected_retrieval_ids.every(
+          (id) => typeof id === "string" && id.trim() !== "",
+        )
+      ) {
+        errors.push({
+          line,
+          message: '"expected_retrieval_ids" must be a list of non-empty strings',
+        });
+        return;
+      }
+      parsed.expected_retrieval_ids = obj.expected_retrieval_ids as string[];
+    }
+
+    if (obj.expected_tool_calls !== undefined) {
+      const calls = parseExpectedToolCalls(obj.expected_tool_calls);
+      if (calls === null) {
+        errors.push({
+          line,
+          message:
+            '"expected_tool_calls" must be a list of {"name": string, "arguments"?: object}',
+        });
+        return;
+      }
+      parsed.expected_tool_calls = calls;
+    }
+
     cases.push(parsed);
   });
 
   return { cases, errors };
+}
+
+function parseExpectedToolCalls(
+  value: unknown,
+): ExpectedToolCallInput[] | null {
+  if (!Array.isArray(value)) return null;
+  const out: ExpectedToolCallInput[] = [];
+  for (const entry of value) {
+    if (
+      typeof entry !== "object" ||
+      entry === null ||
+      Array.isArray(entry) ||
+      typeof (entry as Record<string, unknown>).name !== "string" ||
+      ((entry as Record<string, unknown>).name as string).trim() === ""
+    ) {
+      return null;
+    }
+    const row = entry as Record<string, unknown>;
+    const call: ExpectedToolCallInput = { name: row.name as string };
+    if (row.arguments !== undefined && row.arguments !== null) {
+      if (
+        typeof row.arguments !== "object" ||
+        Array.isArray(row.arguments)
+      ) {
+        return null;
+      }
+      call.arguments = row.arguments as Record<string, unknown>;
+    }
+    out.push(call);
+  }
+  return out;
 }

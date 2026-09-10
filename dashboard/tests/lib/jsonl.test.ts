@@ -52,4 +52,49 @@ describe("parseCasesJsonl", () => {
       1,
     );
   });
+
+  it("parses RAG expected_retrieval_ids", () => {
+    const r = parseCasesJsonl(
+      '{"input": "q", "expected_retrieval_ids": ["kb-1", "kb-2"]}',
+    );
+    expect(r.errors).toEqual([]);
+    expect(r.cases).toEqual([
+      { input: "q", expected_retrieval_ids: ["kb-1", "kb-2"] },
+    ]);
+  });
+
+  it("rejects a non-string-list expected_retrieval_ids", () => {
+    expect(
+      parseCasesJsonl('{"input": "q", "expected_retrieval_ids": [1, 2]}').errors,
+    ).toHaveLength(1);
+    expect(
+      parseCasesJsonl('{"input": "q", "expected_retrieval_ids": "kb-1"}').errors,
+    ).toHaveLength(1);
+  });
+
+  it("parses agent expected_tool_calls with name-only and argument-labelled entries", () => {
+    const r = parseCasesJsonl(
+      '{"input": "q", "expected_tool_calls": [{"name": "search", "arguments": {"q": "x"}}, {"name": "done"}]}',
+    );
+    expect(r.errors).toEqual([]);
+    expect(r.cases[0]?.expected_tool_calls).toEqual([
+      { name: "search", arguments: { q: "x" } },
+      { name: "done" },
+    ]);
+  });
+
+  it("rejects malformed expected_tool_calls", () => {
+    expect(
+      parseCasesJsonl('{"input": "q", "expected_tool_calls": [{"arguments": {}}]}')
+        .errors,
+    ).toHaveLength(1); // missing name
+    expect(
+      parseCasesJsonl(
+        '{"input": "q", "expected_tool_calls": [{"name": "t", "arguments": [1]}]}',
+      ).errors,
+    ).toHaveLength(1); // arguments not an object
+    expect(
+      parseCasesJsonl('{"input": "q", "expected_tool_calls": "search"}').errors,
+    ).toHaveLength(1);
+  });
 });

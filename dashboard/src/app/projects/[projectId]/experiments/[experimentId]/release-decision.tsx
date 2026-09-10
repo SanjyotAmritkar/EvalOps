@@ -8,7 +8,7 @@ import {
   formatPercent,
   formatSignedPercent,
 } from "@/lib/format";
-import { metricLabel } from "@/lib/metric-labels";
+import { metricKind, metricLabel } from "@/lib/metric-labels";
 import {
   EVIDENCE_STATUS_LABEL,
   METRIC_STATUS_LABEL,
@@ -59,6 +59,10 @@ export function ReleaseDecision({
     gated && decision === "pass" && advisories.length > 0;
 
   const lineByMetric = new Map(metrics.map((m) => [m.metric, m]));
+  const hasPassRate = metrics.some((m) => metricKind(m.metric) === "pass_rate");
+  const hasMeanScore = metrics.some(
+    (m) => metricKind(m.metric) === "mean_score",
+  );
   // Deterministic point-only metrics: gated, but no paired-bootstrap evidence.
   const evidenceMetrics = new Set(evidence.map((e) => e.metric));
   const deterministicGated = metrics.filter(
@@ -197,6 +201,25 @@ export function ReleaseDecision({
             })}
           </TBody>
         </Table>
+      ) : null}
+
+      {hasPassRate || hasMeanScore ? (
+        <p className="text-xs text-fg-subtle">
+          {hasPassRate ? (
+            <>
+              <span className="font-medium text-fg-muted">Pass rate</span> is the
+              fraction of evaluator checks that met their threshold.
+            </>
+          ) : null}
+          {hasPassRate && hasMeanScore ? " " : null}
+          {hasMeanScore ? (
+            <>
+              <span className="font-medium text-fg-muted">Mean score</span> is the
+              average graded evaluator score (0–1) — a regression can show here
+              even when the pass rate is unchanged.
+            </>
+          ) : null}
+        </p>
       ) : null}
 
       {evidence.length > 0 ? (

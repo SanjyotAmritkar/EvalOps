@@ -280,3 +280,69 @@ describe("ReleaseDecision — statistical states", () => {
     expect(screen.queryByText(/unverified concerns/i)).not.toBeInTheDocument();
   });
 });
+
+describe("ReleaseDecision — RAG & agent metrics", () => {
+  it("renders human-readable RAG and agent metric names and the pass rate / mean score legend", () => {
+    render(
+      <ReleaseDecision
+        decision="block"
+        gated
+        reasons={["tool_selection.mean_score: higher-is-better regression of 33.3% (limit 10%)"]}
+        resultId="res-7"
+        metrics={[
+          line({ metric: "retrieval_recall.pass_rate", candidate_value: 1 }),
+          line({
+            metric: "tool_selection.mean_score",
+            candidate_value: 0.667,
+            relative_delta: -0.333,
+            adverse_change: 0.333,
+            regression: true,
+            gate_outcome: "regression",
+          }),
+        ]}
+        advisories={[]}
+        evidence={[
+          evidence({
+            metric: "tool_selection.mean_score",
+            kind: "continuous",
+            candidate: { n: 8, mean: 0.667, median: 0.667, stdev: 0 },
+          }),
+        ]}
+      />,
+    );
+
+    // human-readable labels, backend identifier still shown as a sub-line
+    expect(screen.getByText("Retrieval recall — pass rate")).toBeInTheDocument();
+    expect(
+      screen.getAllByText("Tool selection — mean score").length,
+    ).toBeGreaterThan(0);
+    expect(
+      screen.getAllByText("tool_selection.mean_score").length,
+    ).toBeGreaterThan(0);
+
+    // legend distinguishes the two aggregation flavours
+    expect(screen.getByText(/fraction of evaluator checks/i)).toBeInTheDocument();
+    expect(
+      screen.getByText(/average graded evaluator score/i),
+    ).toBeInTheDocument();
+
+    // the decision text is the backend's — no recomputation
+    expect(screen.getByText("BLOCK")).toBeInTheDocument();
+  });
+
+  it("shows no legend for a run with only latency/cost metrics", () => {
+    render(
+      <ReleaseDecision
+        decision="pass"
+        gated
+        reasons={[]}
+        resultId="res-8"
+        metrics={[
+          line({ metric: "latency_ms.p95", direction: "lower_is_better" }),
+          line({ metric: "cost_usd.total", direction: "lower_is_better" }),
+        ]}
+      />,
+    );
+    expect(screen.queryByText(/average graded evaluator score/i)).not.toBeInTheDocument();
+  });
+});
