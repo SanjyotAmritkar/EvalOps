@@ -123,7 +123,7 @@ def test_json_file_is_written(tmp_path: Path) -> None:
 
     assert rc == 0
     payload = json.loads(out.read_text(encoding="utf-8"))
-    assert payload["schema_version"] == 1
+    assert payload["schema_version"] == 2
     assert payload["decision"] == "pass"
 
 
@@ -148,13 +148,16 @@ def test_json_dash_without_quiet_suppresses_human_output(
     captured = capsys.readouterr()
 
     assert "EvalOps Evaluation" not in captured.out
-    assert json.loads(captured.out)["schema_version"] == 1
+    assert json.loads(captured.out)["schema_version"] == 2
 
 
-def test_individual_provider_error_is_not_exit_2(
+def test_individual_provider_error_is_a_release_decision_not_exit_2(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    # Candidate fails one case; success_rate drops to 0.5 and the policy blocks.
+    # Candidate fails one of two cases: success_rate breaches the 0% threshold at
+    # the point estimate, but with only 2 paired samples the statistical guard
+    # (shared with the API) reports an advisory and the run still PASSes -- it is
+    # a release decision, never a system error (exit 2).
     cfg = _write_config(
         tmp_path,
         baseline_latency=40,
@@ -166,9 +169,12 @@ def test_individual_provider_error_is_not_exit_2(
     rc = main(["run", str(cfg)])
     captured = capsys.readouterr()
 
-    assert rc == 1  # a release decision, not a system error
+    assert rc == 0  # PASS with an advisory -- not a BLOCK, not a system error
     assert "error:" not in captured.err
     assert "Failures: 1" in captured.out
+    assert "Advisories" in captured.out
+    assert "success_rate" in captured.out
+    assert "insufficient evidence to block" in captured.out
 
 
 def test_missing_subcommand_is_exit_2() -> None:

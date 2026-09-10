@@ -18,7 +18,10 @@ from evalops.domain.enums import ReleaseDecision
 from evalops.gate import GateReport
 from evalops.runner import RunOutcome
 
-SCHEMA_VERSION = 1
+#: Bumped to 2 in CP 7.1: the CLI now uses the same statistically-aware gate as
+#: the API, so each metric line carries a ``gate_outcome`` and the report a
+#: top-level ``advisories`` list.
+SCHEMA_VERSION = 2
 
 
 @dataclass(frozen=True, slots=True)
@@ -31,7 +34,10 @@ class MetricLine:
     direction: str
     threshold: float | None
     adverse_change: float | None
-    regression: bool
+    regression: bool  # drives BLOCK; True iff gate_outcome == "regression"
+    #: CP 7.1: "pass" | "regression" | "regression_inconclusive" |
+    #: "regression_low_evidence" -- the same per-metric outcome the API returns.
+    gate_outcome: str = "pass"
 
 
 @dataclass(frozen=True, slots=True)
@@ -49,6 +55,9 @@ class RunReport:
     gated: bool
     decision: ReleaseDecision
     reasons: tuple[str, ...]
+    #: CP 7.1: threshold breaches the statistical guard did not block. A run
+    #: with advisories still PASSes (exit 0).
+    advisories: tuple[str, ...] = ()
 
 
 def build_report(
@@ -69,6 +78,7 @@ def build_report(
             threshold=verdicts[mc.metric].threshold,
             adverse_change=verdicts[mc.metric].adverse_change,
             regression=verdicts[mc.metric].regression,
+            gate_outcome=verdicts[mc.metric].outcome,
         )
         for mc in result.metrics
     )
@@ -86,6 +96,7 @@ def build_report(
         gated=gate.gated,
         decision=gate.decision,
         reasons=gate.reasons,
+        advisories=gate.advisories,
     )
 
 
@@ -118,6 +129,13 @@ def human_report(report: RunReport) -> str:
         lines.append("")
         lines.append("Reasons:")
         lines += [f"- {reason}" for reason in report.reasons]
+    if report.advisories:
+        lines.append("")
+        lines.append(
+            "Advisories (threshold breached, but the evidence is too weak to block "
+            "-- this is still a PASS):"
+        )
+        lines += [f"- {advisory}" for advisory in report.advisories]
     return "\n".join(lines) + "\n"
 
 
@@ -144,12 +162,14 @@ def json_report(report: RunReport) -> str:
                 "threshold": m.threshold,
                 "adverse_change": m.adverse_change,
                 "regression": m.regression,
+                "gate_outcome": m.gate_outcome,
             }
             for m in report.metrics
         ],
         "gated": report.gated,
         "decision": report.decision.value,
         "reasons": list(report.reasons),
+        "advisories": list(report.advisories),
     }
     return json.dumps(payload, indent=2, sort_keys=False) + "\n"
 
@@ -169,4 +189,8 @@ def _threshold(line: MetricLine) -> str:
 def _status(line: MetricLine) -> str:
     if line.threshold is None:
         return "-"
-    return "BLOCK" if line.regression else "OK"
+    if line.regression or line.gate_outcome == "regression":
+        return "BLOCK"
+    if line.gate_outcome in ("regression_inconclusive", "regression_low_evidence"):
+        return "ADVISORY"
+    return "OK"

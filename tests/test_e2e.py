@@ -28,7 +28,7 @@ def test_regression_example_blocks(tmp_path: Path, capsys: pytest.CaptureFixture
     assert rc == 1
     assert "EvalOps Evaluation" in captured.out
     payload = json.loads(out.read_text(encoding="utf-8"))
-    assert payload["schema_version"] == 1
+    assert payload["schema_version"] == 2
     assert payload["decision"] == "block"
     assert payload["counts"] == {"cases": 4, "runs": 8, "failures": 0}
     assert any("latency_ms.p95" in reason for reason in payload["reasons"])

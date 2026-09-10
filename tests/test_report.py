@@ -147,7 +147,7 @@ def test_json_report_shape() -> None:
         )
     )
 
-    assert payload["schema_version"] == 1
+    assert payload["schema_version"] == 2
     assert set(payload) == {
         "schema_version",
         "dataset",
@@ -159,8 +159,10 @@ def test_json_report_shape() -> None:
         "gated",
         "decision",
         "reasons",
+        "advisories",
     }
     assert payload["decision"] == "pass"
+    assert payload["advisories"] == []
     assert set(payload["metrics"][0]) == {
         "metric",
         "baseline_value",
@@ -171,6 +173,7 @@ def test_json_report_shape() -> None:
         "threshold",
         "adverse_change",
         "regression",
+        "gate_outcome",
     }
 
 

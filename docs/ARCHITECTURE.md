@@ -346,10 +346,21 @@ table of `evaluation_result` (like `metric_comparison`; the three
 from the table and recomputes an identical decision, so evidence and the
 statistical verdict survive a page refresh.
 
-**CLI.** `evalops run` stays a deterministic point-comparison gate
-(`aggregate_results` produces no evidence, so `evaluate_gate` takes the
-deterministic path). Statistical gating applies to the persisted execution
-path only.
+**CLI / CI gate (CP 7.1).** `evalops run` routes through the same
+`execution.run_evaluation(...)` orchestration the persisted/API path uses:
+run → aggregate → attach paired-bootstrap `evidence` → statistically-aware
+`evaluate_gate`. So the CLI release decision — `pass` /
+`regression_low_evidence` / `regression_inconclusive` / `regression`,
+`MIN_PAIRS_TO_BLOCK`, blocking reasons *and* advisories — is byte-for-byte the
+same verdict a persisted run and the dashboard produce for equivalent data;
+**CI cannot disagree with the dashboard.** The report gains a per-metric
+`gate_outcome` and a top-level `advisories` list (`schema_version` bumped to 2);
+the human report adds an "Advisories" section and an `ADVISORY` status marker.
+Exit codes are unchanged and machine-safe for GitHub Actions: **0** = PASS
+(including PASS with advisories), **1** = release BLOCK, **2** = any
+config/execution/provider/judge error. No interactive prompts; nothing but the
+report is written to stdout; a deterministic mock config is byte-identical
+across runs. GitHub-specific glue is CP 7.2.
 
 ---
 

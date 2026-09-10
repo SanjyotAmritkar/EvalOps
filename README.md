@@ -109,7 +109,12 @@ a feature is listed under **SHIPPED** only if its full path actually works today
 - **Release-policy gating** — fractional adverse-change thresholds, closed
   metric-direction rules, explicit zero-baseline handling, PASS / BLOCK
 - **`evalops run`** — YAML config, human report on stdout, stable `--json`
-  result output, exit codes `0` (pass) / `1` (block) / `2` (error)
+  result output (`schema_version` 2, with per-metric `gate_outcome` and
+  `advisories`), exit codes `0` (pass, incl. pass with advisories) / `1`
+  (block) / `2` (error). The CLI gate routes through the same
+  `run_evaluation` orchestration as the persisted/API path, so its release
+  decision — statistical guard, blocking reasons and advisories — is identical
+  to what the dashboard shows for equivalent data.
 - Worked examples: [examples/support/](examples/support/) — `regression.yaml`
   BLOCKs on a latency budget while quality improves; `fixed.yaml` PASSes;
   `ollama.yaml` is a real local smoke run, verified end to end against a local

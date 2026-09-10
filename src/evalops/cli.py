@@ -2,9 +2,17 @@
 
     evalops run CONFIG [--json PATH|-] [--quiet]
 
-Exit codes: 0 = PASS or ungated, 1 = release-policy BLOCK, 2 = any
-CLI/config/dataset/execution-system error. An individual case ProviderError is
-handled by the runner and never becomes exit 2.
+The CI release gate. It routes through the same ``run_evaluation`` orchestration
+the persisted/API execution path uses, so the release decision -- including the
+Phase 5 statistical guard (``regression`` / ``regression_inconclusive`` /
+``regression_low_evidence``, ``MIN_PAIRS_TO_BLOCK``, blocking reasons and
+advisories) -- is identical to what the dashboard shows.
+
+Exit codes: 0 = PASS or ungated (including PASS with advisories), 1 =
+release-policy BLOCK, 2 = any CLI/config/dataset/execution-system error
+(including a provider/judge failure that aborts the run). An individual case
+``ProviderError`` is handled by the runner and never becomes exit 2. No
+interactive prompts; nothing but the report is written to stdout.
 """
 
 from __future__ import annotations
@@ -14,13 +22,11 @@ import sys
 from collections.abc import Sequence
 from pathlib import Path
 
-from evalops.aggregate import aggregate_results
 from evalops.config import load_run_plan
 from evalops.domain.enums import ReleaseDecision
 from evalops.domain.errors import EvalOpsError
-from evalops.gate import evaluate_gate
+from evalops.execution import run_evaluation
 from evalops.report import build_report, human_report, json_report
-from evalops.runner import run_experiment
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -54,19 +60,18 @@ def _run(config: str, *, json_path: str | None, quiet: bool) -> int:
 
     try:
         plan = load_run_plan(config)
-        outcome = run_experiment(
+        # Same orchestration as the persisted/API path: run -> aggregate ->
+        # attach paired-bootstrap evidence -> statistically-aware evaluate_gate.
+        evaluation = run_evaluation(
             plan.experiment,
             plan.dataset,
             plan.baseline,
             plan.candidate,
-            providers=plan.providers,
+            plan.policy,
             evaluators=plan.evaluators,
+            providers=plan.providers,
         )
-        result = aggregate_results(
-            plan.experiment, outcome, evaluator_names=[e.name for e in plan.evaluators]
-        )
-        gate = evaluate_gate(result, plan.policy)
-        report = build_report(plan, outcome, result, gate)
+        report = build_report(plan, evaluation.outcome, evaluation.result, evaluation.gate)
     except EvalOpsError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2
@@ -83,7 +88,7 @@ def _run(config: str, *, json_path: str | None, quiet: bool) -> int:
         else:
             Path(json_path).write_text(payload, encoding="utf-8")
 
-    return 1 if gate.decision is ReleaseDecision.BLOCK else 0
+    return 1 if evaluation.gate.decision is ReleaseDecision.BLOCK else 0
 
 
 if __name__ == "__main__":  # pragma: no cover
