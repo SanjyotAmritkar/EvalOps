@@ -80,7 +80,7 @@ export default function ReleasePoliciesPage() {
         description="Thresholds that turn a baseline-vs-candidate comparison into a PASS or BLOCK decision."
         actions={
           <Button
-            variant={showForm ? "ghost" : "primary"}
+            variant={showForm ? "secondary" : "primary"}
             onClick={() => setShowForm((value) => !value)}
           >
             {showForm ? "Close" : "New policy"}

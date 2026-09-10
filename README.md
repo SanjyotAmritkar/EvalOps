@@ -204,6 +204,18 @@ a feature is listed under **SHIPPED** only if its full path actually works today
   score* legend. No metric, statistic, or gate outcome is computed in the
   frontend — the backend stays authoritative. Text-only datasets/runs and
   production-trace replay are unchanged.
+- **Dashboard UX foundation** (Phase 10, CP 10.1) — a coherent developer-tool
+  shell: a grouped, responsive project sidebar (Overview / Evaluate / Production
+  / Configuration / Advanced) replacing the horizontally-scrolling tab bar, with
+  all existing routes preserved; a larger, restrained type scale and button
+  hierarchy on shared primitives; an onboarding-focused Projects home
+  ("Ship AI system changes with confidence" + a 5-step *How EvalOps works*); an
+  actionable Project Overview with a real setup checklist (no fabricated
+  analytics); a global **Help** drawer glossary (Dataset, System version,
+  Experiment, Release policy, PASS/BLOCK, inconclusive evidence, …); and a
+  lightweight accessible toast for resource-created feedback. Raw project UUIDs
+  move into a low-emphasis "Project details" disclosure. No backend, API, or
+  evaluation-semantics change; experiment result/evidence visuals are CP 10.2.
 
 ### NOT YET SHIPPED
 

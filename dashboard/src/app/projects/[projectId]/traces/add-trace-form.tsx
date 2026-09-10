@@ -10,6 +10,7 @@ import { apiErrorMessage } from "@/lib/api/errors";
 import type { TraceCreate } from "@/lib/api/types";
 import { useSystemVersions } from "@/lib/query/system-versions";
 import { useCreateTrace } from "@/lib/query/traces";
+import { useToast } from "@/components/ui/toast";
 
 /** Optional numeric field: "" -> undefined; anything non-numeric or < 0 -> invalid. */
 function parseOptionalNonNegative(raw: string): {
@@ -31,6 +32,7 @@ export function AddTraceForm({
 }) {
   const versions = useSystemVersions(projectId);
   const create = useCreateTrace(projectId);
+  const { toast } = useToast();
 
   const [systemVersionId, setSystemVersionId] = useState("");
   const [input, setInput] = useState("");
@@ -65,6 +67,7 @@ export function AddTraceForm({
     };
     create.mutate(body, {
       onSuccess: () => {
+          toast("Trace added");
         setInput("");
         setOutput("");
         setReference("");

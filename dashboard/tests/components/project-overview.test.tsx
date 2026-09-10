@@ -26,52 +26,119 @@ const PROJECT = {
   created_at: "2026-09-08T12:00:00Z",
 };
 
-function stub(counts: { datasets: number; versions: number; experiments: number }) {
+function stub(counts: {
+  datasets: number;
+  versions: number;
+  experiments: unknown[];
+}) {
   vi.stubGlobal(
     "fetch",
     vi.fn((url: string) => {
-      if (url.endsWith("/api/projects/p1")) return Promise.resolve(jsonResponse(PROJECT));
+      if (url.endsWith("/api/projects/p1"))
+        return Promise.resolve(jsonResponse(PROJECT));
       if (url.endsWith("/datasets"))
-        return Promise.resolve(jsonResponse(Array.from({ length: counts.datasets }, (_, i) => ({ id: `d${i}`, cases: [] }))));
+        return Promise.resolve(
+          jsonResponse(
+            Array.from({ length: counts.datasets }, (_, i) => ({
+              id: `d${i}`,
+              name: `dataset-${i}`,
+              cases: [],
+            })),
+          ),
+        );
       if (url.endsWith("/system-versions"))
-        return Promise.resolve(jsonResponse(Array.from({ length: counts.versions }, (_, i) => ({ id: `v${i}` }))));
+        return Promise.resolve(
+          jsonResponse(
+            Array.from({ length: counts.versions }, (_, i) => ({
+              id: `v${i}`,
+              name: "cfg",
+              version: `v${i}`,
+            })),
+          ),
+        );
       if (url.endsWith("/experiments"))
-        return Promise.resolve(jsonResponse(Array.from({ length: counts.experiments }, (_, i) => ({ id: `e${i}` }))));
+        return Promise.resolve(jsonResponse(counts.experiments));
       return Promise.reject(new Error(`unexpected ${url}`));
     }),
   );
 }
 
 describe("ProjectOverviewPage", () => {
-  it("explains the workflow and shows real resource counts", async () => {
-    stub({ datasets: 1, versions: 2, experiments: 3 });
+  it("shows a real setup checklist and the primary action when ready", async () => {
+    stub({ datasets: 1, versions: 2, experiments: [] });
     render(<ProjectOverviewPage />, { wrapper: makeWrapper() });
 
-    expect(
-      screen.getByText(/applies a release policy to decide/i),
-    ).toBeInTheDocument();
+    // teaches the flow without an architecture lecture
+    expect(screen.getByText("How it fits together")).toBeInTheDocument();
     expect(screen.getByText("Baseline")).toBeInTheDocument();
     expect(screen.getByText("Candidate")).toBeInTheDocument();
     expect(screen.getByText("Release decision")).toBeInTheDocument();
 
-    // resources exist -> the primary next action is offered
+    // ready -> primary CTA is "Run evaluation"
     expect(
       await screen.findByRole("link", { name: "Run evaluation" }),
     ).toBeInTheDocument();
 
-    // counts come from the list endpoints, not fabricated
-    await waitFor(() => {
-      const tile = screen.getByText("Experiments").closest("a");
-      expect(tile).toHaveTextContent("3");
-    });
+    // real, actionable setup state (not fabricated analytics)
+    expect(
+      screen.getByText(/1 added — manage datasets/),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(/2 added — manage system versions/),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText("Run it and review the release decision"),
+    ).toBeInTheDocument();
   });
 
-  it("shows a workflow-oriented empty state when the project has nothing", async () => {
-    stub({ datasets: 0, versions: 0, experiments: 0 });
+  it("nudges toward the missing setup step when not ready", async () => {
+    stub({ datasets: 0, versions: 1, experiments: [] });
     render(<ProjectOverviewPage />, { wrapper: makeWrapper() });
 
+    // not ready -> the primary action points at the first missing piece
     expect(
-      await screen.findByText("Nothing to evaluate yet"),
+      await screen.findByRole("link", { name: "Add a dataset" }),
     ).toBeInTheDocument();
+    expect(
+      await screen.findByText(/1 of 2 — add system versions/),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("link", { name: "Run evaluation" }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("lists recent experiments from real data only, newest first", async () => {
+    stub({
+      datasets: 1,
+      versions: 2,
+      experiments: [
+        {
+          id: "e-old",
+          dataset_id: "d0",
+          baseline_version_id: "v0",
+          candidate_version_id: "v1",
+          created_at: "2026-09-01T00:00:00Z",
+        },
+        {
+          id: "e-new",
+          dataset_id: "d0",
+          baseline_version_id: "v0",
+          candidate_version_id: "v1",
+          created_at: "2026-09-09T00:00:00Z",
+        },
+      ],
+    });
+    render(<ProjectOverviewPage />, { wrapper: makeWrapper() });
+
+    await waitFor(() =>
+      expect(screen.getByText("Recent experiments")).toBeInTheDocument(),
+    );
+    const links = screen
+      .getAllByRole("link")
+      .filter((el) => el.getAttribute("href")?.includes("/experiments/"));
+    expect(links[0]).toHaveAttribute(
+      "href",
+      "/projects/p1/experiments/e-new",
+    );
   });
 });

@@ -10,6 +10,7 @@ import { apiErrorMessage } from "@/lib/api/errors";
 import { PROVIDER_NAMES, type ProviderName } from "@/lib/api/types";
 import { parseJsonObject } from "@/lib/json";
 import { useCreateSystemVersion } from "@/lib/query/system-versions";
+import { useToast } from "@/components/ui/toast";
 
 export function SystemVersionForm({
   projectId,
@@ -19,6 +20,7 @@ export function SystemVersionForm({
   onCreated: () => void;
 }) {
   const create = useCreateSystemVersion(projectId);
+  const { toast } = useToast();
 
   const [name, setName] = useState("");
   const [version, setVersion] = useState("");
@@ -59,6 +61,7 @@ export function SystemVersionForm({
       },
       {
         onSuccess: () => {
+          toast("System version created");
           setName("");
           setVersion("");
           setModel("");

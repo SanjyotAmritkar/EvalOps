@@ -18,6 +18,7 @@
   --color-fg-subtle: #a1a1aa;
   --color-accent: #2563eb;
   --color-accent-fg: #ffffff;
+  --color-info: #2563eb;
   --color-pass: #059669;
   --color-block: #dc2626;
   --color-warn: #b45309;
@@ -34,6 +35,7 @@
   --color-fg-subtle: #71717a;
   --color-accent: #3b82f6;
   --color-accent-fg: #ffffff;
+  --color-info: #3b82f6;
   --color-pass: #34d399;
   --color-block: #f87171;
   --color-warn: #fbbf24;
@@ -50,6 +52,7 @@
   --color-fg-subtle: var(--color-fg-subtle);
   --color-accent: var(--color-accent);
   --color-accent-fg: var(--color-accent-fg);
+  --color-info: var(--color-info);
   --color-pass: var(--color-pass);
   --color-block: var(--color-block);
   --color-warn: var(--color-warn);
@@ -76,6 +79,9 @@ body {
   background-color: var(--color-canvas);
   color: var(--color-fg);
   font-family: var(--font-sans);
+  /* Readable 16px base; component classes step down for tables/metadata. */
+  font-size: 16px;
+  line-height: 1.55;
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
 }

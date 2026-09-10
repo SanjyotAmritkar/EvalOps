@@ -29,7 +29,7 @@ export default function DatasetsPage() {
         description="Versioned, immutable collections of evaluation cases."
         actions={
           <Button
-            variant={showForm ? "ghost" : "primary"}
+            variant={showForm ? "secondary" : "primary"}
             onClick={() => setShowForm((value) => !value)}
           >
             {showForm ? "Close" : "New dataset"}

@@ -30,7 +30,7 @@ export function Wordmark() {
           opacity="0.55"
         />
       </svg>
-      <span className="text-sm font-semibold tracking-tight text-fg">
+      <span className="text-[15px] font-semibold tracking-tight text-fg">
         Eval<span className="text-fg-muted">Ops</span>
       </span>
     </span>

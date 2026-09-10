@@ -1,8 +1,9 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ReactNode } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import ProjectsPage from "@/app/projects/page";
+import { ToastProvider } from "@/components/ui/toast";
 import { jsonResponse, makeWrapper } from "../test-utils";
 
 vi.mock("next/link", () => ({
@@ -17,25 +18,74 @@ const PROJECT = {
   created_at: "2026-09-08T12:00:00Z",
 };
 
+function renderPage() {
+  const Wrapper = makeWrapper();
+  return render(
+    <Wrapper>
+      <ToastProvider>
+        <ProjectsPage />
+      </ToastProvider>
+    </Wrapper>,
+  );
+}
+
+/** The <form>'s submit button, distinct from the hero CTA of the same name. */
+function submitButton() {
+  const input = screen.getByLabelText("New project");
+  const form = input.closest("form")!;
+  return within(form).getByRole("button", { name: /create project/i });
+}
+
 afterEach(() => {
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
 });
 
-describe("ProjectsPage", () => {
-  it("shows a loading state, then the empty state", async () => {
+describe("ProjectsPage — onboarding", () => {
+  it("leads with the hero, the how-it-works steps, and both CTAs", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse([])));
+    renderPage();
 
-    render(<ProjectsPage />, { wrapper: makeWrapper() });
+    expect(
+      screen.getByRole("heading", {
+        name: /ship ai system changes with confidence/i,
+      }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("heading", { name: "How EvalOps works" }),
+    ).toBeInTheDocument();
+    // the 5 steps
+    for (const step of [
+      "Dataset",
+      "System versions",
+      "Evaluate",
+      "Analyze",
+      "Release",
+    ]) {
+      expect(screen.getByText(step)).toBeInTheDocument();
+    }
+    // secondary CTA is an anchor to the same-page section
+    expect(
+      screen.getByRole("link", { name: "How EvalOps works" }),
+    ).toHaveAttribute("href", "#how-it-works");
 
-    expect(screen.getByRole("status")).toBeInTheDocument();
     expect(await screen.findByText("No projects yet")).toBeInTheDocument();
+  });
+
+  it("the hero CTA focuses the create field", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse([])));
+    const user = userEvent.setup();
+    renderPage();
+
+    await user.click(
+      screen.getAllByRole("button", { name: /create project/i })[0]!,
+    );
+    expect(screen.getByLabelText("New project")).toHaveFocus();
   });
 
   it("renders each project as a link into its workspace", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse([PROJECT])));
-
-    render(<ProjectsPage />, { wrapper: makeWrapper() });
+    renderPage();
 
     const link = await screen.findByRole("link", { name: /Support Assistant/ });
     expect(link).toHaveAttribute("href", "/projects/p1");
@@ -44,12 +94,9 @@ describe("ProjectsPage", () => {
   it("surfaces an API failure with a retry affordance", async () => {
     vi.stubGlobal(
       "fetch",
-      vi.fn().mockResolvedValue(
-        jsonResponse({ detail: "database is down" }, 500),
-      ),
+      vi.fn().mockResolvedValue(jsonResponse({ detail: "database is down" }, 500)),
     );
-
-    render(<ProjectsPage />, { wrapper: makeWrapper() });
+    renderPage();
 
     expect(
       await screen.findByText("Could not load projects"),
@@ -59,7 +106,7 @@ describe("ProjectsPage", () => {
     ).toBeInTheDocument();
   });
 
-  it("POSTs the trimmed name, shows the new project, and clears the input", async () => {
+  it("POSTs the trimmed name, toasts, shows the project, and clears the input", async () => {
     const created = {
       id: "p2",
       name: "New App",
@@ -73,18 +120,17 @@ describe("ProjectsPage", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     const user = userEvent.setup();
-    render(<ProjectsPage />, { wrapper: makeWrapper() });
+    renderPage();
 
     const input = await screen.findByLabelText("New project");
     await user.type(input, "  New App  ");
-    await user.click(
-      screen.getByRole("button", { name: /create project/i }),
-    );
+    await user.click(submitButton());
 
     expect(await screen.findByText("New App")).toBeInTheDocument();
-    await waitFor(() =>
-      expect((input as HTMLInputElement).value).toBe(""),
-    );
+    expect(
+      await screen.findByText(/Project .*New App.* created/),
+    ).toBeInTheDocument();
+    await waitFor(() => expect((input as HTMLInputElement).value).toBe(""));
 
     const postCall = fetchMock.mock.calls.find(
       (call) => (call[1] as RequestInit | undefined)?.method === "POST",
@@ -105,13 +151,11 @@ describe("ProjectsPage", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     const user = userEvent.setup();
-    render(<ProjectsPage />, { wrapper: makeWrapper() });
+    renderPage();
 
     const input = await screen.findByLabelText("New project");
     await user.type(input, "x");
-    await user.click(
-      screen.getByRole("button", { name: /create project/i }),
-    );
+    await user.click(submitButton());
 
     expect(
       await screen.findByText("name must be non-empty"),

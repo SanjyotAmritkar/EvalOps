@@ -13,7 +13,7 @@ export function Table({
   return (
     <div className="overflow-x-auto rounded-lg border border-border">
       <table
-        className={cn("w-full border-collapse text-sm", className)}
+        className={cn("w-full border-collapse text-[14px]", className)}
         {...props}
       />
     </div>
@@ -23,7 +23,7 @@ export function Table({
 export function THead(props: HTMLAttributes<HTMLTableSectionElement>) {
   return (
     <thead
-      className="bg-surface-raised text-left text-xs font-medium uppercase tracking-wide text-fg-subtle"
+      className="bg-surface-raised text-left text-[13px] font-medium text-fg-muted"
       {...props}
     />
   );
@@ -50,7 +50,11 @@ export function TH({
   ...props
 }: ThHTMLAttributes<HTMLTableCellElement>) {
   return (
-    <th scope="col" className={cn("px-3 py-2 font-medium", className)} {...props} />
+    <th
+      scope="col"
+      className={cn("px-3 py-2.5 font-medium", className)}
+      {...props}
+    />
   );
 }
 
@@ -59,6 +63,6 @@ export function TD({
   ...props
 }: TdHTMLAttributes<HTMLTableCellElement>) {
   return (
-    <td className={cn("px-3 py-2 align-top text-fg", className)} {...props} />
+    <td className={cn("px-3 py-2.5 align-top text-fg", className)} {...props} />
   );
 }

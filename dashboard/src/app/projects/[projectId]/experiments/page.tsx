@@ -65,7 +65,7 @@ function ExperimentsPageInner() {
         description="Each experiment compares your current system against a candidate on one dataset, then runs the evaluation."
         actions={
           <Button
-            variant={showForm ? "ghost" : "primary"}
+            variant={showForm ? "secondary" : "primary"}
             onClick={() => setShowForm((value) => !value)}
           >
             {showForm ? "Close" : "New experiment"}

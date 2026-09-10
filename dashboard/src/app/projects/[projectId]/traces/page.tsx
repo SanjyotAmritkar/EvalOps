@@ -80,7 +80,7 @@ export default function ProductionTracesPage() {
         description="Real interactions captured from the running system. Select representative ones and promote them into a replay dataset that flows through the normal experiment and release-gate workflow."
         actions={
           <Button
-            variant={showAddForm ? "ghost" : "secondary"}
+            variant="secondary"
             onClick={() => setShowAddForm((value) => !value)}
           >
             {showAddForm ? "Close" : "Add trace"}

@@ -30,7 +30,7 @@ export default function SystemVersionsPage() {
         description="Named, immutable configurations of the system under evaluation — the reproducibility anchor for every experiment."
         actions={
           <Button
-            variant={showForm ? "ghost" : "primary"}
+            variant={showForm ? "secondary" : "primary"}
             onClick={() => setShowForm((value) => !value)}
           >
             {showForm ? "Close" : "New system version"}

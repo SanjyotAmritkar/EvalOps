@@ -9,6 +9,7 @@ import { ApiError } from "@/lib/api/client";
 import { apiErrorMessage } from "@/lib/api/errors";
 import { parseCasesJsonl } from "@/lib/jsonl";
 import { useCreateDataset } from "@/lib/query/datasets";
+import { useToast } from "@/components/ui/toast";
 
 const EXAMPLE_TEXT = `{"input": "What is 2 + 2?", "expected_output": "4"}
 {"input": "Capital of France?", "expected_output": "Paris"}`;
@@ -27,6 +28,7 @@ export function DatasetForm({
   onCreated: () => void;
 }) {
   const create = useCreateDataset(projectId);
+  const { toast } = useToast();
   const [name, setName] = useState("");
   const [version, setVersion] = useState("1");
   const [jsonl, setJsonl] = useState("");
@@ -54,6 +56,7 @@ export function DatasetForm({
       { name: name.trim(), version: versionNumber, cases: parsed.cases },
       {
         onSuccess: () => {
+          toast("Dataset created");
           setName("");
           setVersion("1");
           setJsonl("");

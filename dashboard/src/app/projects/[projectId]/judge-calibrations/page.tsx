@@ -32,7 +32,7 @@ export default function JudgeCalibrationsPage() {
         description="Run a configured LLM judge over human-labeled examples to measure how often it agrees with the humans."
         actions={
           <Button
-            variant={showForm ? "ghost" : "primary"}
+            variant={showForm ? "secondary" : "primary"}
             onClick={() => setShowForm((value) => !value)}
           >
             {showForm ? "Close" : "New calibration"}
@@ -40,7 +40,7 @@ export default function JudgeCalibrationsPage() {
         }
       />
 
-      <p className="rounded-md border border-border bg-surface-raised px-3 py-2 text-xs text-fg-muted">
+      <p className="rounded-md border border-border bg-surface-raised px-4 py-3 text-[14px] leading-relaxed text-fg-muted">
         Calibration measures judge trustworthiness only. It{" "}
         <span className="font-medium text-fg">
           does not affect release gating

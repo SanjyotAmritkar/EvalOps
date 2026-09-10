@@ -494,6 +494,38 @@ External AI system
 
 Production-trace replay datasets and every prior workflow are unaffected.
 
+### 7.7 Implemented: dashboard UX foundation (Phase 10, CP 10.1)
+
+A product-UX refactor of the dashboard shell only — **no backend, API,
+persistence, or evaluation-semantics change**, and no deep redesign of the
+experiment result/evidence views (that is CP 10.2).
+
+* **Information architecture** — the crowded horizontally-scrolling project tab
+  bar is replaced by a grouped, responsive project navigation
+  (`ProjectNav`): **Overview** · **Evaluate** (Experiments, Datasets, System
+  Versions) · **Production** (Production Traces) · **Configuration** (Release
+  Policies) · **Advanced** (Judge Calibration). A sticky left sidebar on
+  desktop, a collapsible section menu on narrow widths, no horizontal scroll.
+  Every route is unchanged. The project name is the sidebar context header; the
+  raw project UUID moves into a low-emphasis "Project details" disclosure.
+* **Design system** — existing tokens are reused and extended (one added
+  `--color-info` alias for the blue accent). A materially larger, non-uppercase
+  type scale on the shared primitives (`PageHeader`, `Table`, form fields,
+  `EmptyState`, `Steps`), a four-level button hierarchy
+  (`primary` / `secondary` / `ghost` / `danger`, with `sm`/`md`/`lg` sizes),
+  and light + dark themes both kept coherent.
+* **Home / Help / Overview** — the Projects page leads with the hero *"Ship AI
+  system changes with confidence."*, a **Create project** primary CTA and an
+  inline 5-step *How EvalOps works*. A global **Help** drawer (accessible slide-
+  over, Escape / backdrop close, focus managed) carries a plain-language
+  glossary. The Project Overview is an actionable home: a real setup checklist
+  (dataset → baseline/candidate → experiment → decision) and *Recent
+  experiments* from data already fetched — **no project-level "latest decision"
+  is fabricated** (there is no backend endpoint for it).
+* **Feedback** — a minimal dependency-free toast (`ToastProvider` / `useToast`,
+  `aria-live="polite"`) for resource-created confirmations only; persistent
+  state (PASS/BLOCK, job progress) and field validation stay inline.
+
 ---
 
 ## 8. Statistical Rigor

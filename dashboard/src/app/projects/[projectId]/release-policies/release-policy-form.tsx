@@ -8,6 +8,7 @@ import { TextField } from "@/components/ui/text-field";
 import { apiErrorMessage } from "@/lib/api/errors";
 import { KNOWN_POLICY_METRICS } from "@/lib/metrics";
 import { useCreateReleasePolicy } from "@/lib/query/release-policies";
+import { useToast } from "@/components/ui/toast";
 
 interface ThresholdRow {
   metric: string;
@@ -18,6 +19,7 @@ const emptyRow: ThresholdRow = { metric: "", value: "" };
 
 export function ReleasePolicyForm({ onCreated }: { onCreated: () => void }) {
   const create = useCreateReleasePolicy();
+  const { toast } = useToast();
   const [name, setName] = useState("");
   const [rows, setRows] = useState<ThresholdRow[]>([{ ...emptyRow }]);
   const [safety, setSafety] = useState("0");
@@ -66,6 +68,7 @@ export function ReleasePolicyForm({ onCreated }: { onCreated: () => void }) {
       },
       {
         onSuccess: () => {
+          toast("Release policy created");
           setName("");
           setRows([{ ...emptyRow }]);
           setSafety("0");
