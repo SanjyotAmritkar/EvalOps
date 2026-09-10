@@ -158,13 +158,26 @@ a feature is listed under **SHIPPED** only if its full path actually works today
   straight into the existing experiment form (`?dataset=` preselect). A small
   secondary "Add trace" form uses the existing POST endpoint with explicit
   fields only. No charts, no new evaluation semantics.
+- **RAG evaluation foundation** (Phase 9, CP 9.1) — a provider execution result
+  can carry framework-neutral **retrieval evidence** (`RetrievedItem`:
+  `doc_id` / `content` / `rank` / optional `score`), threaded onto the run;
+  `MockProvider` reports it deterministically. Three deterministic evaluators —
+  `retrieval_recall`, `context_precision`, and `groundedness`
+  (`groundedness_lexical`, an explicitly-labelled lexical-overlap approximation,
+  *not* a hallucination detector) — score it against
+  `DatasetCase.expected_retrieval_ids`. RAG metrics enter the **existing**
+  aggregation → paired-bootstrap evidence → release gate as `<name>.pass_rate`,
+  with no RAG-specific runner, experiment type, or gate. EvalOps evaluates
+  retrieval behaviour; it does not own a vector DB, embeddings, or the retrieval
+  pipeline. One narrow additive migration; text-only providers, runs, and
+  datasets are unchanged.
 
 ### NOT YET SHIPPED
 
 - Hosted provider execution — OpenAI, Anthropic
 - Evaluation execution via the API
 - Statistical gating — bootstrap confidence intervals, significance, effect size
-- RAG evaluation, agent evaluation, LLM-as-judge
+- RAG generation-quality metrics beyond lexical groundedness; agent / tool-trajectory evaluation
 - Cloud deployment
 
 `MockProvider` is deterministic test infrastructure for offline development and

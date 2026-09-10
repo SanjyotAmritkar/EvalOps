@@ -22,6 +22,7 @@ from evalops.errors import ConfigError
 from evalops.judge import LLMJudge
 from evalops.ollama import DEFAULT_TIMEOUT_SECONDS
 from evalops.provider_registry import make_provider
+from evalops.rag_evaluators import ContextPrecision, GroundednessLexical, RetrievalRecall
 
 
 def _score(name: str, *, passed: bool) -> EvaluatorScore:
@@ -102,7 +103,15 @@ class RegexMatch:
         return _score(self.name, passed=re.search(self.pattern, run.output) is not None)
 
 
-_EVALUATOR_TYPES = ("exact_match", "contains", "regex_match", "llm_judge")
+_EVALUATOR_TYPES = (
+    "exact_match",
+    "contains",
+    "regex_match",
+    "llm_judge",
+    "retrieval_recall",
+    "context_precision",
+    "groundedness",
+)
 
 
 def build_evaluators(specs: Sequence[Mapping[str, Any]]) -> tuple[Evaluator, ...]:
@@ -141,6 +150,21 @@ def build_evaluators(specs: Sequence[Mapping[str, Any]]) -> tuple[Evaluator, ...
             evaluator = RegexMatch(pattern=pattern, name=name or "regex_match")
         elif evaluator_type == "llm_judge":
             evaluator = _build_llm_judge(spec, label, name)
+        elif evaluator_type == "retrieval_recall":
+            evaluator = RetrievalRecall(
+                min_recall=_spec_float(spec, "min_recall", label, default=1.0),
+                name=name or "retrieval_recall",
+            )
+        elif evaluator_type == "context_precision":
+            evaluator = ContextPrecision(
+                min_precision=_spec_float(spec, "min_precision", label, default=1.0),
+                name=name or "context_precision",
+            )
+        elif evaluator_type == "groundedness":
+            evaluator = GroundednessLexical(
+                min_groundedness=_spec_float(spec, "min_groundedness", label, default=0.8),
+                name=name or "groundedness_lexical",
+            )
         else:
             raise ConfigError(
                 f"{label}.type {evaluator_type!r} is not one of {list(_EVALUATOR_TYPES)}"
@@ -160,6 +184,15 @@ def _spec_bool(spec: Mapping[str, Any], key: str, label: str, *, default: bool) 
     if not isinstance(value, bool):
         raise ConfigError(f"{label}.{key} must be a boolean")
     return value
+
+
+def _spec_float(spec: Mapping[str, Any], key: str, label: str, *, default: float) -> float:
+    if key not in spec:
+        return default
+    value = spec[key]
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise ConfigError(f"{label}.{key} must be a number")
+    return float(value)
 
 
 def _build_llm_judge(spec: Mapping[str, Any], label: str, name: str | None) -> LLMJudge:

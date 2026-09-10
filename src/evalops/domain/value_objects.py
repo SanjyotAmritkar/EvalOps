@@ -39,6 +39,29 @@ class UsageMetrics:
 
 
 @dataclass(frozen=True, slots=True)
+class RetrievedItem:
+    """One document/chunk a RAG system reported retrieving for a case (Phase 9).
+
+    Framework-neutral: no embedding vectors, no vector-store handles, no
+    LangChain types. Just what a retrieval evaluator needs -- a stable
+    identifier, the retrieved text, its rank in the retrieved list, and an
+    optional retrieval score. EvalOps never performs retrieval; it only records
+    what an external system says it retrieved.
+    """
+
+    doc_id: str
+    content: str
+    rank: int
+    score: float | None = None
+
+    def __post_init__(self) -> None:
+        if not self.doc_id.strip():
+            raise DomainValidationError("RetrievedItem.doc_id must be a non-empty string")
+        if self.rank < 0:
+            raise DomainValidationError(f"RetrievedItem.rank must be >= 0, got {self.rank}")
+
+
+@dataclass(frozen=True, slots=True)
 class EvaluatorScore:
     """The result a single Evaluator produces for a single EvaluationRun.
 

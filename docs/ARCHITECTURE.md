@@ -329,6 +329,69 @@ evaluation semantics and no charts / observability dashboard.
 Frontend only — the dashboard never re-derives a decision, and no backend,
 gate, or schema code changed in this checkpoint.
 
+### 7.4 Implemented: RAG evaluation foundation (Phase 9, CP 9.1)
+
+**EvalOps evaluates retrieval behavior; it does not own the vector database or
+the retrieval pipeline.** No embeddings, no vector store, no document
+ingestion, no LangChain. An external RAG system reports what it retrieved;
+EvalOps scores it through the *same* pipeline every other evaluator uses.
+
+```
+External RAG system
+  -> provider execution result
+       -> answer  (ProviderResponse.text)
+       -> retrieval evidence  (ProviderResponse.retrieval: tuple[RetrievedItem])
+  -> existing Eval Runner  (threads retrieval onto EvaluationRun.retrieval)
+       -> retrieval / grounding evaluators  (ordinary Evaluator implementations)
+  -> aggregation -> paired-bootstrap statistical evidence  (via <name>.pass_rate)
+  -> existing release policy  (thresholds on <name>.pass_rate; unchanged gate)
+```
+
+**Retrieval evidence.** `RetrievedItem(doc_id, content, rank, score?)` — the
+minimal, framework-neutral record. `ProviderResponse.retrieval` and
+`EvaluationRun.retrieval` both default to `()`, so every text-only provider and
+run is byte-identical to before. `MockProvider` reports deterministic evidence
+from `parameters['mock']['retrieval']` (prompt → item list) /
+`retrieval_default`. EvalOps performs no retrieval.
+
+**Ground truth.** `DatasetCase.expected_retrieval_ids: tuple[str, ...]`
+(default `()`), the relevant document/chunk ids. Every existing dataset and
+every promoted-trace dataset stays valid with no labels.
+
+**Evaluators** (all deterministic; each emits an ordinary `EvaluatorScore` with
+the graded value in `score` and a threshold-derived `passed`, so
+`<name>.pass_rate` flows through aggregation, evidence and the gate unchanged):
+
+| type | metric | zero-denominator | default pass |
+|---|---|---|---|
+| `retrieval_recall` | `|relevant ∩ retrieved| / |relevant|` (unique ids) | no labels → `ConfigError` (never fabricated); nothing retrieved → `0.0` | `recall >= 1.0` |
+| `context_precision` | `|relevant ∩ retrieved| / |retrieved|` (unique ids) | no labels → `ConfigError`; **nothing retrieved → `0.0`** (a retrieval failure, not perfect precision) | `precision >= 1.0` |
+| `groundedness` → `groundedness_lexical` | `|answer_content_words ∩ context_content_words| / |answer_content_words|` | empty answer → `1.0` (vacuous); no context → `0.0` | `>= 0.8` |
+
+`groundedness_lexical` is a **deterministic lexical approximation** of answer
+support — it measures word overlap with the retrieved context, **not** semantic
+truth or factual correctness, and is **not a hallucination detector**. The
+result name carries the `_lexical` suffix and `LEXICAL_GROUNDEDNESS_NOTE`
+states the limitation. A semantic groundedness *judge* would require extending
+`LLMJudge` to take retrieval context as input — deliberately deferred so the
+core metric stays deterministic and hosted-LLM-free.
+
+**No RAG-specific machinery.** No RAG runner, experiment type, gate, or
+statistics module. RAG metrics are `<name>.pass_rate` like any evaluator;
+`gate._direction` already maps `*.pass_rate` to higher-is-better and
+`expected_metric_names` already yields it. Continuous `score` values are
+persisted on `evaluator_score.score` for inspection but are not aggregated —
+pass-rate semantics were sufficient for CP 9.1 (see limitations in the CP
+report for the graded-but-threshold-passing blind spot).
+
+**Persistence / API (additive, one narrow migration `0e9c976c83ee`).**
+`evaluation_run.retrieval` and `dataset_case.expected_retrieval_ids` are JSON
+columns, `NOT NULL DEFAULT '[]'`, so a populated database backfills cleanly.
+`EvaluationRunRead.retrieval` and `DatasetCaseRead.expected_retrieval_ids`
+expose them through the existing run / dataset representations; no new
+endpoints. `GET /results` recompute is unchanged — retrieval evidence is not
+needed to reconstruct an `EvaluationResult`.
+
 ---
 
 ## 8. Statistical Rigor

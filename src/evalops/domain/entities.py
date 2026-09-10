@@ -23,6 +23,7 @@ from evalops.domain.value_objects import (
     JudgeCalibrationMetrics,
     MetricComparison,
     MetricEvidence,
+    RetrievedItem,
     UsageMetrics,
 )
 
@@ -114,17 +115,29 @@ class SystemVersion:
 
 @dataclass(frozen=True, slots=True)
 class DatasetCase:
-    """A single evaluation case: an input and, optionally, a reference output."""
+    """A single evaluation case: an input and, optionally, a reference output.
+
+    ``expected_retrieval_ids`` (Phase 9) is the ground-truth set of relevant
+    document/chunk ids for RAG retrieval evaluators. Empty for every non-RAG
+    case, so existing datasets and promoted-trace datasets stay valid.
+    """
 
     input: str
     expected_output: str | None = None
     origin: CaseOrigin = CaseOrigin.AUTHORED
     source_trace_id: str | None = None
+    expected_retrieval_ids: tuple[str, ...] = ()
     id: str = field(default_factory=new_id)
 
     def __post_init__(self) -> None:
         _require_non_empty(self.input, "DatasetCase.input")
         _require_non_empty(self.id, "DatasetCase.id")
+        object.__setattr__(self, "expected_retrieval_ids", tuple(self.expected_retrieval_ids))
+        for relevant_id in self.expected_retrieval_ids:
+            if not isinstance(relevant_id, str) or not relevant_id.strip():
+                raise DomainValidationError(
+                    "DatasetCase.expected_retrieval_ids entries must be non-empty strings"
+                )
         has_trace = bool(self.source_trace_id and self.source_trace_id.strip())
         if self.origin is CaseOrigin.PROMOTED_TRACE and not has_trace:
             raise DomainValidationError(
@@ -203,6 +216,10 @@ class EvaluationRun:
 
     A successful run carries the model ``output``; a failed run carries a
     non-blank ``error`` and typically an empty ``output`` with zero usage.
+
+    ``retrieval`` (Phase 9) is the retrieval evidence an external RAG system
+    reported for this execution -- zero or more :class:`RetrievedItem`,
+    provider/framework-neutral. Empty for every text-only run.
     """
 
     experiment_id: str
@@ -212,6 +229,7 @@ class EvaluationRun:
     output: str
     usage: UsageMetrics = field(default_factory=UsageMetrics)
     error: str | None = None
+    retrieval: tuple[RetrievedItem, ...] = ()
     id: str = field(default_factory=new_id)
     created_at: datetime = field(default_factory=utcnow)
 
@@ -229,6 +247,7 @@ class EvaluationRun:
             )
         if self.error is not None and not self.error.strip():
             raise DomainValidationError("EvaluationRun.error must be non-blank when set")
+        object.__setattr__(self, "retrieval", tuple(self.retrieval))
         _require_aware(self.created_at, "EvaluationRun.created_at")
 
 

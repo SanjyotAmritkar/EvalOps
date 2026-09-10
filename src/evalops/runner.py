@@ -103,6 +103,7 @@ def _execute(
         repeat_index=repeat_index,
         output=response.text,
         usage=response.usage,
+        retrieval=response.retrieval,
     )
 
 

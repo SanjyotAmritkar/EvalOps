@@ -8,7 +8,7 @@ import pytest
 
 from evalops.domain.enums import EvaluatorFamily
 from evalops.domain.errors import DomainValidationError
-from evalops.domain.value_objects import EvaluatorScore, UsageMetrics
+from evalops.domain.value_objects import EvaluatorScore, RetrievedItem, UsageMetrics
 
 
 class TestUsageMetrics:
@@ -91,3 +91,23 @@ class TestEvaluatorScore:
 
         with pytest.raises(FrozenInstanceError):
             score.score = 0.0  # type: ignore[misc]
+
+
+class TestRetrievedItem:
+    def test_valid_item(self) -> None:
+        item = RetrievedItem(doc_id="d1", content="text", rank=2, score=0.7)
+        assert (item.doc_id, item.rank, item.score) == ("d1", 2, 0.7)
+        assert RetrievedItem(doc_id="d1", content="", rank=0).score is None
+
+    def test_blank_doc_id_is_rejected(self) -> None:
+        with pytest.raises(DomainValidationError):
+            RetrievedItem(doc_id="  ", content="x", rank=0)
+
+    def test_negative_rank_is_rejected(self) -> None:
+        with pytest.raises(DomainValidationError):
+            RetrievedItem(doc_id="d1", content="x", rank=-1)
+
+    def test_is_immutable(self) -> None:
+        item = RetrievedItem(doc_id="d1", content="x", rank=0)
+        with pytest.raises(FrozenInstanceError):
+            item.doc_id = "d2"  # type: ignore[misc]

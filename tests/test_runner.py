@@ -10,7 +10,7 @@ import pytest
 from evalops.domain.contracts import Evaluator, ProviderClient, ProviderError, ProviderResponse
 from evalops.domain.entities import Dataset, DatasetCase, EvaluationRun, Experiment, SystemVersion
 from evalops.domain.enums import EvaluatorFamily, ProviderName
-from evalops.domain.value_objects import EvaluatorScore, UsageMetrics
+from evalops.domain.value_objects import EvaluatorScore, RetrievedItem, UsageMetrics
 from evalops.errors import ConfigError
 from evalops.evaluators import ExactMatch, RegexMatch
 from evalops.runner import RunOutcome, run_experiment
@@ -28,11 +28,13 @@ class _StubProvider:
         response: str = "ok",
         fail_on: Collection[str] = (),
         raises: type[BaseException] | None = None,
+        retrieval: tuple[RetrievedItem, ...] = (),
     ) -> None:
         self.name = name
         self._response = response
         self._fail_on = set(fail_on)
         self._raises = raises
+        self._retrieval = retrieval
         self.seen: list[str] = []
 
     def complete(self, prompt: str, config: SystemVersion) -> ProviderResponse:
@@ -44,6 +46,7 @@ class _StubProvider:
         return ProviderResponse(
             text=self._response,
             usage=UsageMetrics(prompt_tokens=2, completion_tokens=3, latency_ms=7.0),
+            retrieval=self._retrieval,
         )
 
 
@@ -206,6 +209,33 @@ def test_successful_output_and_usage_are_preserved() -> None:
     assert run.output == "hello"
     assert (run.usage.prompt_tokens, run.usage.completion_tokens) == (2, 3)
     assert run.usage.latency_ms == 7.0
+    assert run.retrieval == ()  # text-only provider: no retrieval evidence
+
+
+def test_provider_retrieval_evidence_is_threaded_onto_the_run() -> None:
+    baseline, candidate = _sv(), _sv(prompt="X: ${input}")
+    items = (
+        RetrievedItem(doc_id="d1", content="alpha", rank=0, score=0.5),
+        RetrievedItem(doc_id="d2", content="beta", rank=1),
+    )
+    outcome = _run(
+        baseline=baseline,
+        candidate=candidate,
+        dataset=_dataset("a"),
+        providers={ProviderName.OPENAI: _StubProvider("openai", retrieval=items)},
+    )
+
+    assert outcome.runs[0].retrieval == items
+    # a failed run carries no retrieval evidence
+    failed = _run(
+        baseline=baseline,
+        candidate=candidate,
+        dataset=_dataset("a"),
+        providers={
+            ProviderName.OPENAI: _StubProvider("openai", fail_on={"P: a", "X: a"}, retrieval=items)
+        },
+    )
+    assert all(run.retrieval == () for run in failed.runs)
 
 
 def test_one_case_result_per_run_in_order() -> None:

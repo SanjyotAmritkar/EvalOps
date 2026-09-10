@@ -72,3 +72,13 @@ def test_is_immutable() -> None:
 
     with pytest.raises(FrozenInstanceError):
         run.output = "other"  # type: ignore[misc]
+
+
+def test_retrieval_defaults_empty_and_normalises_to_tuple() -> None:
+    from evalops.domain.value_objects import RetrievedItem
+
+    assert EvaluationRun(**VALID_KWARGS).retrieval == ()
+    items = [RetrievedItem(doc_id="d1", content="x", rank=0)]
+    run = EvaluationRun(**VALID_KWARGS, retrieval=items)  # type: ignore[arg-type]
+    assert run.retrieval == tuple(items)
+    assert isinstance(run.retrieval, tuple)

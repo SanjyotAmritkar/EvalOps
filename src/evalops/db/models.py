@@ -113,6 +113,9 @@ class DatasetCase(Base):
     position: Mapped[int] = mapped_column(Integer, nullable=False)
     input: Mapped[str] = mapped_column(Text, nullable=False)
     expected_output: Mapped[str | None] = mapped_column(Text, nullable=True)
+    #: RAG ground truth (Phase 9): relevant document/chunk ids for this case, as
+    #: a JSON string list. Empty for every non-RAG case.
+    expected_retrieval_ids: Mapped[list[str]] = mapped_column(JSONMap, nullable=False, default=list)
     origin: Mapped[CaseOrigin] = mapped_column(
         _enum(CaseOrigin, "case_origin"), nullable=False, default=CaseOrigin.AUTHORED
     )
@@ -208,6 +211,10 @@ class EvaluationRun(Base):
     repeat_index: Mapped[int] = mapped_column(Integer, nullable=False)
     output: Mapped[str] = mapped_column(Text, nullable=False)
     error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    #: RAG retrieval evidence (Phase 9): a JSON list of
+    #: ``{doc_id, content, rank, score}`` objects the external system reported.
+    #: Empty for every text-only run.
+    retrieval: Mapped[list[dict[str, Any]]] = mapped_column(JSONMap, nullable=False, default=list)
     prompt_tokens: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     completion_tokens: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     cost_usd: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)

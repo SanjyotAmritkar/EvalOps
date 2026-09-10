@@ -362,6 +362,52 @@ def test_evaluation_run_round_trip_preserves_usage(sessions: Sessions, graph: Gr
     assert for_exp == {ok.id, failed.id}
 
 
+def test_evaluation_run_round_trip_preserves_retrieval_evidence(
+    sessions: Sessions, graph: Graph
+) -> None:
+    run = domain.EvaluationRun(
+        experiment_id=graph.experiment.id,
+        system_version_id=graph.baseline.id,
+        case_id=graph.dataset.cases[0].id,
+        repeat_index=0,
+        output="grounded answer",
+        retrieval=(
+            domain.RetrievedItem(doc_id="d1", content="first chunk", rank=0, score=0.9),
+            domain.RetrievedItem(doc_id="d2", content="second chunk", rank=1),
+        ),
+    )
+    with unit_of_work(sessions) as session:
+        EvaluationRunRepository(session).add(run)
+
+    with unit_of_work(sessions) as session:
+        loaded = EvaluationRunRepository(session).get(run.id)
+
+    assert loaded == run
+    assert loaded is not None
+    assert [i.doc_id for i in loaded.retrieval] == ["d1", "d2"]
+    assert loaded.retrieval[0].score == 0.9 and loaded.retrieval[1].score is None
+
+
+def test_dataset_round_trip_preserves_expected_retrieval_ids(sessions: Sessions) -> None:
+    project = _project()
+    dataset = _dataset(
+        project,
+        domain.DatasetCase(input="rag q", expected_retrieval_ids=("a", "b", "c")),
+        domain.DatasetCase(input="plain q", expected_output="x"),
+    )
+    with unit_of_work(sessions) as session:
+        ProjectRepository(session).add(project)
+        DatasetRepository(session).add(dataset)
+
+    with unit_of_work(sessions) as session:
+        loaded = DatasetRepository(session).get(dataset.id)
+
+    assert loaded == dataset
+    assert loaded is not None
+    assert loaded.cases[0].expected_retrieval_ids == ("a", "b", "c")
+    assert loaded.cases[1].expected_retrieval_ids == ()
+
+
 def test_case_result_round_trip_preserves_scores(sessions: Sessions, graph: Graph) -> None:
     exp = graph.experiment
     baseline = graph.baseline

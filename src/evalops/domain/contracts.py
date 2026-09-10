@@ -12,7 +12,7 @@ from typing import Protocol, runtime_checkable
 from evalops.domain.entities import DatasetCase, EvaluationRun, SystemVersion
 from evalops.domain.enums import EvaluatorFamily
 from evalops.domain.errors import EvalOpsError
-from evalops.domain.value_objects import EvaluatorScore, UsageMetrics
+from evalops.domain.value_objects import EvaluatorScore, RetrievedItem, UsageMetrics
 
 
 class ProviderError(EvalOpsError):
@@ -21,10 +21,21 @@ class ProviderError(EvalOpsError):
 
 @dataclass(frozen=True, slots=True)
 class ProviderResponse:
-    """The result of a single provider completion call."""
+    """The result of a single provider completion call.
+
+    ``retrieval`` (Phase 9) lets a RAG-capable provider report the context it
+    retrieved for this call. It defaults to empty, so every existing text-only
+    provider keeps returning ``ProviderResponse(text=..., usage=...)`` unchanged.
+    EvalOps does not perform retrieval -- this only records what the external
+    system reports.
+    """
 
     text: str
     usage: UsageMetrics
+    retrieval: tuple[RetrievedItem, ...] = ()
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "retrieval", tuple(self.retrieval))
 
 
 @runtime_checkable

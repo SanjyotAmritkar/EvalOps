@@ -95,6 +95,64 @@ def test_complete_returns_a_provider_response() -> None:
     assert isinstance(MockProvider().complete("x", _sv({})), ProviderResponse)
 
 
+# --- retrieval evidence (Phase 9) ------------------------------------
+
+
+def test_no_retrieval_by_default() -> None:
+    assert MockProvider().complete("x", _sv({"responses": {"x": "y"}})).retrieval == ()
+
+
+def test_deterministic_retrieval_evidence_per_prompt() -> None:
+    sv = _sv(
+        {
+            "responses": {"Q: k": "a"},
+            "retrieval": {
+                "Q: k": [
+                    {"doc_id": "d2", "content": "second", "rank": 1, "score": 0.4},
+                    {"doc_id": "d1", "content": "first", "rank": 0},
+                ]
+            },
+        }
+    )
+    first = MockProvider().complete("Q: k", sv).retrieval
+    second = MockProvider().complete("Q: k", sv).retrieval
+    assert first == second
+    assert [i.doc_id for i in first] == ["d2", "d1"]  # order preserved verbatim
+    assert first[0].rank == 1 and first[0].score == 0.4
+    assert first[1].rank == 0 and first[1].score is None
+
+
+def test_retrieval_default_and_rank_fallback() -> None:
+    sv = _sv(
+        {
+            "responses": {},
+            "retrieval": {"Q: k": [{"doc_id": "hit", "content": "c"}]},
+            "retrieval_default": [{"doc_id": "fallback", "content": "c"}],
+        }
+    )
+    assert [i.doc_id for i in MockProvider().complete("Q: k", sv).retrieval] == ["hit"]
+    other = MockProvider().complete("Q: other", sv).retrieval
+    assert [i.doc_id for i in other] == ["fallback"]
+    assert other[0].rank == 0  # rank defaults to position
+
+
+@pytest.mark.parametrize(
+    "mock",
+    [
+        {"retrieval": "not a map"},
+        {"retrieval": {"p": "not a list"}},
+        {"retrieval": {"p": [{"content": "no doc id"}]}},
+        {"retrieval": {"p": [{"doc_id": "d", "rank": -1}]}},
+        {"retrieval": {"p": [{"doc_id": "d", "score": "high"}]}},
+        {"retrieval": {"p": [{"doc_id": "d", "unknown": 1}]}},
+        {"retrieval_default": [{"doc_id": ""}]},
+    ],
+)
+def test_malformed_retrieval_config_raises_config_error(mock: Any) -> None:
+    with pytest.raises(ConfigError):
+        MockProvider().complete("p", _sv(mock))
+
+
 @pytest.mark.parametrize(
     "mock",
     [

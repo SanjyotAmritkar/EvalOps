@@ -42,6 +42,7 @@ from evalops.domain.value_objects import (
     MetricComparison,
     MetricEvidence,
     MetricKind,
+    RetrievedItem,
     SampleSummary,
     UsageMetrics,
 )
@@ -77,6 +78,7 @@ __all__ = [
     "ProviderResponse",
     "ReleaseDecision",
     "ReleasePolicy",
+    "RetrievedItem",
     "SampleSummary",
     "SystemVersion",
     "TraceOrigin",

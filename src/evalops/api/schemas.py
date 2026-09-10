@@ -54,6 +54,8 @@ class DatasetCaseCreate(_Create):
     expected_output: str | None = None
     origin: CaseOrigin = CaseOrigin.AUTHORED
     source_trace_id: str | None = None
+    # RAG ground truth (Phase 9): relevant document/chunk ids for this case.
+    expected_retrieval_ids: list[str] = []
 
 
 class DatasetCreate(_Create):
@@ -78,6 +80,7 @@ class DatasetCaseRead(BaseModel):
     expected_output: str | None
     origin: CaseOrigin
     source_trace_id: str | None
+    expected_retrieval_ids: list[str] = []
 
 
 class DatasetRead(BaseModel):
@@ -103,6 +106,7 @@ class DatasetRead(BaseModel):
                     expected_output=case.expected_output,
                     origin=case.origin,
                     source_trace_id=case.source_trace_id,
+                    expected_retrieval_ids=list(case.expected_retrieval_ids),
                 )
                 for case in value.cases
             ],
@@ -290,6 +294,11 @@ class EvaluatorSpec(_Create):
     model: str | None = None
     temperature: float | None = None
     base_url: str | None = None
+    # RAG evaluators (Phase 9) -- per-evaluator pass thresholds on the graded
+    # metric (0..1). retrieval_recall / context_precision / groundedness.
+    min_recall: float | None = None
+    min_precision: float | None = None
+    min_groundedness: float | None = None
 
 
 class RunRequest(_Create):
@@ -449,6 +458,15 @@ class EvaluatorScoreRead(BaseModel):
     passed: bool | None
 
 
+class RetrievedItemRead(BaseModel):
+    """One retrieved document/chunk an external RAG system reported (Phase 9)."""
+
+    doc_id: str
+    content: str
+    rank: int
+    score: float | None
+
+
 class EvaluationRunRead(BaseModel):
     id: str
     system_version_id: str
@@ -458,6 +476,8 @@ class EvaluationRunRead(BaseModel):
     error: str | None
     usage: UsageRead
     scores: list[EvaluatorScoreRead]
+    #: RAG retrieval evidence, empty for text-only runs (Phase 9).
+    retrieval: list[RetrievedItemRead] = []
     created_at: datetime
 
     @classmethod
@@ -478,6 +498,15 @@ class EvaluationRunRead(BaseModel):
                 cost_usd=run.usage.cost_usd,
                 latency_ms=run.usage.latency_ms,
             ),
+            retrieval=[
+                RetrievedItemRead(
+                    doc_id=item.doc_id,
+                    content=item.content,
+                    rank=item.rank,
+                    score=item.score,
+                )
+                for item in run.retrieval
+            ],
             scores=[]
             if case_result is None
             else [

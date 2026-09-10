@@ -4,6 +4,8 @@ One JSON object per non-blank line. Recognised keys:
 
 - ``input`` -- required, non-empty string
 - ``expected_output`` -- optional string
+- ``expected_retrieval_ids`` -- optional list of non-empty strings (RAG ground
+  truth: the relevant document/chunk ids for this case)
 - ``id`` -- optional non-empty string, unique across the file; generated when absent
 
 Every malformed, empty, or duplicate-id input raises :class:`ConfigError` with
@@ -21,7 +23,7 @@ from evalops.domain.enums import CaseOrigin
 from evalops.domain.ids import new_id
 from evalops.errors import ConfigError
 
-_ALLOWED_KEYS = {"input", "expected_output", "id"}
+_ALLOWED_KEYS = {"input", "expected_output", "expected_retrieval_ids", "id"}
 
 
 def load_jsonl(path: str | Path, *, project_id: str, name: str | None = None) -> Dataset:
@@ -76,6 +78,12 @@ def _parse_line(line: str, lineno: int, file_path: Path, first_seen: dict[str, i
     if expected is not None and not isinstance(expected, str):
         raise ConfigError(f"{where}: 'expected_output' must be a string when present")
 
+    raw_ids = obj.get("expected_retrieval_ids", [])
+    if not isinstance(raw_ids, list) or not all(isinstance(x, str) and x.strip() for x in raw_ids):
+        raise ConfigError(
+            f"{where}: 'expected_retrieval_ids' must be a list of non-empty strings when present"
+        )
+
     case_id = obj.get("id")
     if case_id is not None:
         if not isinstance(case_id, str) or not case_id.strip():
@@ -89,6 +97,7 @@ def _parse_line(line: str, lineno: int, file_path: Path, first_seen: dict[str, i
     return DatasetCase(
         input=raw_input,
         expected_output=expected,
+        expected_retrieval_ids=tuple(raw_ids),
         origin=CaseOrigin.AUTHORED,
         id=case_id if isinstance(case_id, str) else new_id(),
     )

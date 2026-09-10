@@ -30,6 +30,7 @@ from evalops.errors import ConfigError
 from evalops.evaluators import Contains, ExactMatch, build_evaluators
 from evalops.execution import Backend, ExecutionSpec, build_providers
 from evalops.ollama import DEFAULT_BASE_URL, DEFAULT_TIMEOUT_SECONDS
+from evalops.rag_evaluators import ContextPrecision, RetrievalRecall
 
 _SUPPORTED_BACKENDS = frozenset({"mock", "ollama", "openai", "anthropic", "live"})
 
@@ -95,6 +96,7 @@ def load_run_plan(config_path: str | Path) -> RunPlan:
 
     evaluators = _build_evaluators(root)
     _check_reference_outputs(evaluators, dataset)
+    _check_retrieval_labels(evaluators, dataset)
 
     policy = _build_policy(root, [e.name for e in evaluators])
 
@@ -153,6 +155,17 @@ def _check_reference_outputs(evaluators: Sequence[Evaluator], dataset: Dataset) 
     if missing:
         raise ConfigError(
             f"exact_match/contains require expected_output on every case; missing for: {missing}"
+        )
+
+
+def _check_retrieval_labels(evaluators: Sequence[Evaluator], dataset: Dataset) -> None:
+    if not any(isinstance(e, RetrievalRecall | ContextPrecision) for e in evaluators):
+        return
+    missing = [case.id for case in dataset.cases if not case.expected_retrieval_ids]
+    if missing:
+        raise ConfigError(
+            "retrieval_recall/context_precision require expected_retrieval_ids on every "
+            f"case; missing for: {missing}"
         )
 
 

@@ -108,6 +108,7 @@ def create_dataset(project_id: str, body: DatasetCreate, session: SessionDep) ->
             domain.DatasetCase(
                 input=case.input,
                 expected_output=case.expected_output,
+                expected_retrieval_ids=tuple(case.expected_retrieval_ids),
                 origin=case.origin,
                 source_trace_id=case.source_trace_id,
             )

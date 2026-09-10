@@ -55,3 +55,14 @@ def test_is_immutable() -> None:
 
     with pytest.raises(FrozenInstanceError):
         case.input = "other"  # type: ignore[misc]
+
+
+def test_expected_retrieval_ids_default_empty_and_normalise_to_tuple() -> None:
+    assert DatasetCase(input="q").expected_retrieval_ids == ()
+    case = DatasetCase(input="q", expected_retrieval_ids=["d1", "d2"])  # type: ignore[arg-type]
+    assert case.expected_retrieval_ids == ("d1", "d2")
+
+
+def test_blank_expected_retrieval_id_is_rejected() -> None:
+    with pytest.raises(DomainValidationError):
+        DatasetCase(input="q", expected_retrieval_ids=("d1", "  "))

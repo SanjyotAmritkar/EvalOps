@@ -9,9 +9,32 @@ evaluator scores, and metric comparisons all round-trip.
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from typing import Any
 
 from evalops import domain
 from evalops.db import models as orm
+
+
+def _retrieval_to_json(items: tuple[domain.RetrievedItem, ...]) -> list[dict[str, Any]]:
+    return [
+        {"doc_id": it.doc_id, "content": it.content, "rank": it.rank, "score": it.score}
+        for it in items
+    ]
+
+
+def _retrieval_from_json(raw: object) -> tuple[domain.RetrievedItem, ...]:
+    if not isinstance(raw, list):
+        return ()
+    return tuple(
+        domain.RetrievedItem(
+            doc_id=str(entry["doc_id"]),
+            content=str(entry.get("content", "")),
+            rank=int(entry.get("rank", position)),
+            score=None if entry.get("score") is None else float(entry["score"]),
+        )
+        for position, entry in enumerate(raw)
+        if isinstance(entry, dict) and entry.get("doc_id")
+    )
 
 
 def _aware(value: datetime) -> datetime:
@@ -62,6 +85,7 @@ def _case_to_orm(value: domain.DatasetCase, position: int) -> orm.DatasetCase:
         position=position,
         input=value.input,
         expected_output=value.expected_output,
+        expected_retrieval_ids=list(value.expected_retrieval_ids),
         origin=value.origin,
         source_trace_id=value.source_trace_id,
     )
@@ -72,6 +96,7 @@ def _case_from_orm(row: orm.DatasetCase) -> domain.DatasetCase:
         id=row.id,
         input=row.input,
         expected_output=row.expected_output,
+        expected_retrieval_ids=tuple(row.expected_retrieval_ids or ()),
         origin=row.origin,
         source_trace_id=row.source_trace_id,
     )
@@ -174,6 +199,7 @@ def evaluation_run_to_orm(value: domain.EvaluationRun) -> orm.EvaluationRun:
         repeat_index=value.repeat_index,
         output=value.output,
         error=value.error,
+        retrieval=_retrieval_to_json(value.retrieval),
         prompt_tokens=value.usage.prompt_tokens,
         completion_tokens=value.usage.completion_tokens,
         cost_usd=value.usage.cost_usd,
@@ -191,6 +217,7 @@ def evaluation_run_from_orm(row: orm.EvaluationRun) -> domain.EvaluationRun:
         repeat_index=row.repeat_index,
         output=row.output,
         error=row.error,
+        retrieval=_retrieval_from_json(row.retrieval),
         usage=domain.UsageMetrics(
             prompt_tokens=row.prompt_tokens,
             completion_tokens=row.completion_tokens,
