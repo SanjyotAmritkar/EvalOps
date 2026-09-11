@@ -79,3 +79,35 @@ jobs:
 
       - name: Build (next build)
         run: npm run build
+
+  docker:
+    name: docker build (${{ matrix.image }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - image: backend
+            context: .
+            dockerfile: Dockerfile
+          - image: dashboard
+            context: dashboard
+            dockerfile: dashboard/Dockerfile
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      # Verifies the image CP 10.4 ships actually builds reproducibly from a
+      # clean checkout. Not pushed anywhere; no registry/deployment yet.
+      - name: Build ${{ matrix.image }} image
+        uses: docker/build-push-action@v6
+        with:
+          context: ${{ matrix.context }}
+          file: ${{ matrix.dockerfile }}
+          push: false
+          cache-from: type=gha,scope=${{ matrix.image }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.image }}

@@ -663,6 +663,125 @@ diagnostics, persistence, or provider-behaviour change.**
   are multiple instances/services to correlate across process boundaries
   (tracked for CP 10.6 / production polish), not before.
 
+### 7.10 Implemented: runtime resilience + containerization (Phase 10, CP 10.4)
+
+The full application now runs as a production-shaped container stack --
+`browser → dashboard → api → postgres` / `redis ← worker` -- with **no change**
+to evaluation, statistical, gate, diagnostics, or persistence semantics. This
+is runtime hardening, not an architecture rewrite.
+
+* **One backend image, three roles.** `Dockerfile` (repo root) is a
+  multi-stage build (`uv sync --locked --no-dev`, non-root `evalops` user, no
+  source mount) that serves the API, the Celery worker, and the one-shot
+  migration job -- distinguished only by the container `command:` in
+  `docker-compose.yml`. No secret is baked in; provider keys and tuning are
+  injected as environment variables at container run time.
+* **Dashboard image.** `dashboard/Dockerfile` is a multi-stage Next.js
+  **standalone** build (`output: "standalone"`): the runtime layer ships only
+  the traced `node_modules`, `server.js`, `.next/static`, and `public/` --
+  no dev server, non-root `node` user. **The `/api/*` proxy moved from
+  `next.config.ts`'s `rewrites()` to `src/proxy.ts` (Next's current name for
+  what used to be "Middleware")** -- a real bug caught during this
+  checkpoint's manual verification: `rewrites()` is evaluated once at
+  `next build` and baked into a static routes manifest, so an image built with
+  one `API_PROXY_TARGET` silently kept proxying to it forever regardless of
+  what the *running* container's environment said. Proxy code runs per
+  request in the deployed server (including `node server.js`), so it reads
+  `API_PROXY_TARGET` from the current environment on every request -- the same
+  built image now genuinely works against any API location supplied at
+  container start, which is the whole point of building an image once.
+* **Compose topology** (`docker-compose.yml`, repo root; `infra/docker-compose.yml`
+  is unchanged and still covers the lighter "just need a Redis broker" local
+  flow) -- `postgres`, `redis`, `migrate`, `api`, `worker`, `dashboard`, a named
+  `postgres_data` volume, and per-service health checks. `postgres`/`redis` are
+  not published to the host by default (CP 10.4 security baseline); internal
+  traffic uses Compose's own DNS (service names as hostnames), fixed directly
+  in the compose file rather than read from `.env` -- `.env`'s `DATABASE_URL`
+  (`localhost`) is for the *non-containerized* dev flow and would not resolve
+  from inside another container.
+* **Migration strategy** -- a dedicated one-shot `migrate` service runs
+  `alembic upgrade head` and exits; `api` and `worker` both declare
+  `depends_on: migrate: condition: service_completed_successfully`, so neither
+  starts before migrations succeed and neither ever races the other to run
+  them (the API and worker processes themselves never run a migration).
+  Idempotent and restart-safe: re-running `alembic upgrade head` against an
+  already-current schema is a no-op, verified by restarting the whole stack.
+* **Process lifecycle** -- `uvicorn` is passed `--timeout-graceful-shutdown 10`
+  so an in-flight HTTP request finishes before SIGTERM (Compose's default stop
+  signal) tears the process down. The worker's `stop_signal: SIGTERM` +
+  `stop_grace_period: 30s` trigger Celery's own warm shutdown (stop accepting
+  new tasks, finish the current one); prefork child processes are reaped by
+  the parent on the same signal, so there is no orphan-process assumption.
+  `--concurrency` is configurable (`CELERY_CONCURRENCY`, default `2` --
+  appropriate for a single-machine local/demo deployment).
+* **Celery reliability -- delivery semantics, stated honestly.** The task
+  delivery Celery offers here is **at-most-once**, not at-least-once and never
+  exactly-once. `task_acks_late=False` (Celery's own default, now set
+  explicitly) acknowledges a task to the broker the moment a worker *receives*
+  it; if the worker then dies mid-evaluation, Redis has already forgotten the
+  task and nothing redelivers it. This is a deliberate choice, not an
+  oversight: `execute_experiment` calls real, possibly nondeterministic,
+  possibly billed model providers, and CP 10.4 explicitly separates three
+  categories of "retry" --
+  (A) broker/infrastructure reconnection (`broker_connection_retry` /
+  `_on_startup`, both **on** -- reconnecting transport is always safe),
+  (B) evaluation-task redelivery, and
+  (C) provider/model call retry --
+  and only (A) is enabled. Enabling (B) (`task_acks_late=True` +
+  `task_reject_on_worker_lost=True`) would silently re-run a possibly-billed,
+  possibly-different-output evaluation merely because a worker process died;
+  this checkpoint does not do that, and no `autoretry_for` exists anywhere. A
+  configurable soft/hard time limit (`CELERY_TASK_SOFT_TIME_LIMIT_S` /
+  `_TIME_LIMIT_S`, default 1800s/1900s, 0 disables) is a safety net against a
+  genuinely hung task occupying a worker slot forever -- when it fires, the
+  existing `except Exception` in `execute_experiment_task` marks the job
+  `failed` exactly as any other error would (`SoftTimeLimitExceeded` is a
+  plain `Exception` subclass); it is not a retry. `worker_prefetch_multiplier`
+  is set to `1` for fair dispatch of long-running tasks -- independent of the
+  ack semantics above. See `src/evalops/worker/celery_app.py`'s module
+  docstring for the full rationale in one place.
+* **Interrupted / stale jobs.** The corollary of at-most-once delivery: if a
+  worker dies after `AsyncJobRepository.mark_running` commits but before the
+  task's own transaction commits, the `async_job` row is left at `running`
+  forever -- nothing redelivers the task, and this checkpoint adds no
+  reaper/heartbeat/scheduler to notice and reap it (a large subsystem the
+  scope guard explicitly defers). This is safe, not silently wrong, because
+  `execute_experiment`'s persistence is a **single transaction**: every
+  `EvaluationRun`/`CaseResult`/`EvaluationResult` row for an experiment is
+  written and committed together, or (on any exception, including the process
+  being killed) none of them are. A stale `running` job therefore never
+  coexists with partial data, and the underlying experiment is safe to
+  re-dispatch as a **new** `async_job` (`execute_experiment` only refuses a
+  *second* run once runs already exist). **Recovery procedure:** confirm the
+  original worker process is actually gone, `GET /experiments/{id}/runs` to
+  confirm nothing was persisted (guaranteed by the above), then
+  `POST /experiments/{id}/run-async` again; the old job row is left `running`
+  as a historical (if confusing) artifact -- reaping it is deferred to
+  CP 10.5/10.6.
+* **Health/readiness reused, not reinvented.** Container health checks call
+  the CP 10.3 endpoints directly: `api`'s check is `GET /ready`; `worker`'s is
+  `celery … inspect ping` (Celery's own standard liveness probe, a real
+  round-trip through the broker); `dashboard`'s is a plain HTTP GET (it has no
+  `/health` of its own, matching CP 10.3's "health/readiness is primarily a
+  backend concern"); `postgres`/`redis` use their own standard tools
+  (`pg_isready`, `redis-cli ping`). No external LLM provider is ever part of
+  any of these checks.
+* **Ollama stays out of the production Compose stack** -- only `MockProvider`
+  is exercised by it. A `SystemVersion` pointed at Ollama from a container
+  needs `OLLAMA_BASE_URL` set explicitly (`http://host.docker.internal:11434`
+  on Docker Desktop for macOS/Windows; Linux needs either
+  `extra_hosts: host.docker.internal:host-gateway` or the host's real
+  address) -- deliberately left as a documented override rather than a
+  hard-coded, platform-specific default.
+* **Security baseline (containers only; full API auth/CORS is CP 10.5).**
+  Non-root users in both images; no secret baked into either Dockerfile/image
+  (provider keys arrive only as runtime `environment:`); `postgres`/`redis`
+  not published to the host by default; no privileged containers; no Docker
+  socket mount; minimal published ports (`8000` API, `3000` dashboard only).
+* **CI** builds both images on every push/PR (`.github/workflows/ci.yml`,
+  `docker` job, GitHub Actions cache) to catch a broken build early; nothing
+  is pushed to a registry yet.
+
 ---
 
 ## 8. Statistical Rigor

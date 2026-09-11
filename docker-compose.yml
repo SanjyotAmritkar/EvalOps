@@ -1,0 +1,187 @@
+# Full production-shaped EvalOps stack (Phase 10, CP 10.4):
+#
+#   browser -> dashboard -> api -> postgres
+#                             \        ^
+#                              -> redis <- worker
+#
+# This is the containerized equivalent of the local dev flow documented in the
+# README ("Run the API" / "Run the dashboard" / "Run the background worker") --
+# it changes nothing about evaluation, gate, or persistence semantics.
+#
+# Quick start:
+#   docker compose up --build
+#   open http://localhost:3000
+#
+# Internal service hostnames (postgres, redis, api) are Compose's own DNS and
+# are fixed below -- they are not meant to be overridden from a local `.env`,
+# which uses `localhost` for the *non-containerized* dev flow instead (see
+# .env.example). Only genuinely user-supplied values (provider keys, log
+# level/format, concurrency, build metadata) are read from the environment.
+#
+# Postgres and Redis are intentionally NOT published to the host here (CP 10.4
+# security baseline: internal dependencies stay internal); uncomment their
+# `ports:` if you need to reach them directly from the host for debugging.
+
+name: evalops
+
+x-backend-image: &backend-image
+  build:
+    context: .
+    dockerfile: Dockerfile
+  environment: &backend-environment
+    DATABASE_URL: postgresql+psycopg://evalops:evalops@postgres:5432/evalops
+    CELERY_BROKER_URL: redis://redis:6379/0
+    EVALOPS_REQUIRE_REDIS: "true"
+    EVALOPS_LOG_LEVEL: ${EVALOPS_LOG_LEVEL:-INFO}
+    EVALOPS_LOG_FORMAT: ${EVALOPS_LOG_FORMAT:-json}
+    EVALOPS_ENV: ${EVALOPS_ENV:-production}
+    EVALOPS_REVISION: ${EVALOPS_REVISION:-}
+    OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
+    OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+    ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: evalops
+      POSTGRES_PASSWORD: evalops
+      POSTGRES_DB: evalops
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U evalops -d evalops"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+    # ports: ["5432:5432"]   # uncomment for host access (psql, a GUI client, ...)
+
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+    # ports: ["6379:6379"]   # uncomment for host access
+
+  # One-shot: apply migrations, then exit. api/worker wait for this to succeed
+  # (`service_completed_successfully`) so neither races the other to migrate,
+  # and a migration failure prevents both from starting on a stale schema.
+  # Idempotent: `alembic upgrade head` against an already-current database is a
+  # no-op, so this is safe on every restart of the stack.
+  migrate:
+    <<: *backend-image
+    command: ["alembic", "upgrade", "head"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+
+  api:
+    <<: *backend-image
+    command:
+      [
+        "uvicorn",
+        "evalops.api.main:app",
+        "--host",
+        "0.0.0.0",
+        "--port",
+        "8000",
+        # Graceful shutdown: let an in-flight HTTP request finish before the
+        # worker process exits on SIGTERM (Compose's default stop signal).
+        "--timeout-graceful-shutdown",
+        "10",
+      ]
+    ports:
+      - "8000:8000"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+    healthcheck:
+      # Readiness (not liveness): confirms this container can itself reach
+      # Postgres + Redis, reusing the CP 10.3 /ready endpoint -- no new health
+      # mechanism. No external LLM provider is ever part of this check.
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request,sys; sys.exit(0) if urllib.request.urlopen('http://127.0.0.1:8000/ready', timeout=3).status == 200 else sys.exit(1)",
+        ]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 10s
+    restart: unless-stopped
+
+  worker:
+    <<: *backend-image
+    command:
+      [
+        "celery",
+        "-A",
+        "evalops.worker.celery_app:celery_app",
+        "worker",
+        "--loglevel=info",
+        # Local/demo-appropriate: enough parallelism to see concurrent runs
+        # without over-subscribing a laptop. Override with CELERY_CONCURRENCY.
+        "--concurrency=${CELERY_CONCURRENCY:-2}",
+      ]
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+    healthcheck:
+      # Round-trips through the broker to the worker process itself -- the
+      # standard Celery liveness probe, not a new mechanism.
+      test:
+        [
+          "CMD-SHELL",
+          "celery -A evalops.worker.celery_app:celery_app inspect ping --timeout 5 | grep -q OK",
+        ]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 15s
+    restart: unless-stopped
+    # SIGTERM (Compose's default) triggers Celery's warm shutdown: the worker
+    # stops accepting new tasks and waits for the current one to finish before
+    # exiting. No orphaned child processes: prefork workers are reaped by the
+    # parent on the same signal.
+    stop_signal: SIGTERM
+    stop_grace_period: 30s
+
+  dashboard:
+    build:
+      context: ./dashboard
+      dockerfile: Dockerfile
+    environment:
+      API_PROXY_TARGET: http://api:8000
+    ports:
+      - "3000:3000"
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "require('http').get('http://127.0.0.1:3000/', r => process.exit(r.statusCode < 500 ? 0 : 1)).on('error', () => process.exit(1))",
+        ]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 10s
+    restart: unless-stopped
+
+volumes:
+  postgres_data:

@@ -1,0 +1,26 @@
+# Minimal build context for the backend image (Dockerfile at repo root).
+# Keep in sync with what the image actually needs: src/, alembic/, alembic.ini,
+# pyproject.toml, uv.lock, README.md, LICENSE.
+
+.git
+.github
+.venv
+.env
+.env.*
+
+**/__pycache__
+**/*.pyc
+.mypy_cache
+.pytest_cache
+.ruff_cache
+.coverage
+htmlcov
+
+# Frontend, docs, examples, and tests are not needed inside the backend image.
+dashboard
+docs
+examples
+tests
+
+.DS_Store
+*.log

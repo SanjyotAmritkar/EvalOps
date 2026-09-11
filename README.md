@@ -256,6 +256,28 @@ a feature is listed under **SHIPPED** only if its full path actually works today
   semantics change. OpenTelemetry was evaluated and explicitly deferred —
   structured logs + correlation ids are sufficient for this checkpoint (see
   `docs/ARCHITECTURE.md` §7.9).
+- **Runtime resilience + containerization** (Phase 10, CP 10.4) — the whole
+  application runs as a production-shaped `docker compose up` stack (dashboard,
+  API, worker, PostgreSQL, Redis) with no change to evaluation/gate/persistence
+  semantics. One non-root backend image (`Dockerfile`) serves the API, the
+  worker, and a dedicated one-shot `alembic upgrade head` migration job that
+  both must wait on (`service_completed_successfully`) before starting, so
+  migrations never race; a multi-stage Next.js **standalone** image
+  (`dashboard/Dockerfile`) serves the dashboard, its `/api/*` proxy moved from
+  a build-time-baked `next.config.ts` rewrite into a request-time Proxy
+  (`src/proxy.ts`) so the same built image can point at any API location via
+  `API_PROXY_TARGET` at container start. Container health checks reuse the
+  CP 10.3 `/health`/`/ready` endpoints and Celery's own `inspect ping` — no new
+  health mechanism. The worker deliberately keeps Celery's **at-most-once**
+  task delivery (`task_acks_late=False`) so a crashed worker is never
+  automatically redelivered a nondeterministic, possibly-billed evaluation; a
+  generous configurable time limit is a safety net against a hung task, not a
+  retry. This makes a worker-death mid-run a **stale `running` job** with a
+  documented, manual recovery procedure rather than a scheduler/reaper
+  subsystem (deferred). Verified with a real `docker compose up --build`:
+  create → async-run → Celery execution → persisted PASS/BLOCK decision →
+  full-stack restart with data intact, all correlated end-to-end by the
+  CP 10.3 `request_id`. See `docs/ARCHITECTURE.md` §7.10.
 
 ### NOT YET SHIPPED
 
@@ -470,6 +492,71 @@ job through its states and persists `EvaluationRun` / `EvaluationResult` rows
 exactly as the synchronous `POST /experiments/{id}/run` does; PostgreSQL — not
 Redis — is the authoritative record of job status.
 
+### Run the full stack with Docker (Phase 10, CP 10.4)
+
+`docker compose up --build` (or `make compose-up`) brings up the entire
+application — dashboard, API, worker, PostgreSQL, Redis — as a
+production-shaped container stack, with the same evaluation/gate/persistence
+semantics as the flows above:
+
+```bash
+cp .env.example .env    # fill in OPENAI_API_KEY / ANTHROPIC_API_KEY only if you need them
+docker compose up --build
+open http://localhost:3000
+```
+
+**Topology** — `browser → dashboard (:3000) → api (:8000) → postgres` /
+`redis ← worker`. `postgres` and `redis` are not published to the host by
+default (uncomment their `ports:` in `docker-compose.yml` if you need direct
+access); service-to-service traffic uses Compose's own DNS
+(`postgres`, `redis`, `api` as hostnames), fixed in `docker-compose.yml` —
+not read from `.env`, which is for the non-containerized flow above instead.
+
+**Images** — one backend image (`Dockerfile`, multi-stage `uv sync --locked`,
+non-root user) serves the API, the worker, *and* the one-shot migration job,
+distinguished only by the container `command:`. The dashboard
+(`dashboard/Dockerfile`) is a multi-stage Next.js **standalone** build — no
+dev server, no `node_modules` beyond what's traced, non-root user. Both build
+in CI (`.github/workflows/ci.yml`, `docker` job) on every push/PR; neither is
+published anywhere yet.
+
+**Migrations** — a dedicated one-shot `migrate` service runs
+`alembic upgrade head` and exits; `api` and `worker` both wait for it to
+*succeed* (`service_completed_successfully`) before starting, so neither races
+the other to migrate and a migration failure blocks both. Safe to re-run on
+every restart (`alembic upgrade head` against a current schema is a no-op).
+
+**Health/readiness** — container health checks reuse the CP 10.3 endpoints,
+not a new mechanism: `api`'s check is `GET /ready` (Postgres + Redis
+reachability, no LLM provider involved); `postgres`/`redis` use their own
+standard probes (`pg_isready`, `redis-cli ping`); `worker`'s is
+`celery inspect ping` (a real round-trip through the broker to the worker
+process); `dashboard`'s is a plain HTTP probe (it has no `/health` of its own
+— that is the API's concern). `dashboard` waits on `api`'s health,
+`api`/`worker` wait on `redis`'s health and `migrate`'s success.
+
+**Celery delivery semantics** — the worker keeps **at-most-once** task
+delivery (`task_acks_late=False`): a worker dying mid-evaluation is never
+retried, because a repeated provider call is neither free nor deterministic.
+See `src/evalops/worker/celery_app.py`'s module docstring and
+`docs/ARCHITECTURE.md` CP 10.4 for the full rationale, the resulting
+**stale-job** limitation (a job stuck at `running` after a worker dies is not
+auto-recovered in this checkpoint), and the manual recovery procedure.
+
+**Ollama and container networking** — Ollama is not part of this Compose
+stack (only Mock is used for the deterministic path above); if you point a
+`SystemVersion` at Ollama running on your host while the API/worker run in
+containers, `localhost` inside a container means the container itself, not
+your host. Use `OLLAMA_BASE_URL=http://host.docker.internal:11434` on Docker
+Desktop (macOS/Windows); on Linux, either add
+`extra_hosts: ["host.docker.internal:host-gateway"]` to the service or point
+at the host's real LAN/bridge address — there is no single value that works
+identically everywhere, so this is left as an explicit override rather than a
+hard-coded guess.
+
+Stop everything with `docker compose down` (add `-v` only if you want to
+delete the `postgres_data` volume and start clean).
+
 ### Repository layout
 
 ```
@@ -478,6 +565,8 @@ examples/         runnable offline example configs
 tests/            test suite
 docs/             architecture & project reference
 .github/          CI workflows
+Dockerfile        backend image (API / worker / migration job)
+docker-compose.yml  full containerized stack (Phase 10, CP 10.4)
 ```
 
 Additional top-level directories (`datasets/`, `dashboard/`, `infra/`, ...) are
