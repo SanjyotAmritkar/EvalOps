@@ -226,6 +226,69 @@ describe("api proxy route — upstream response pass-through", () => {
   });
 });
 
+describe("api proxy route — server-side API-key injection (CP 10.5)", () => {
+  it("attaches Authorization: Bearer <key> when EVALOPS_API_KEY is configured", async () => {
+    vi.stubEnv("EVALOPS_API_KEY", "s3cr3t-server-key");
+    const fetchMock = stubFetch(new Response("{}", { status: 200 }));
+
+    await GET(request("/api/projects"), ctx("projects"));
+
+    const [, init] = fetchMock.mock.calls[0]!;
+    expect((init.headers as Headers).get("authorization")).toBe(
+      "Bearer s3cr3t-server-key",
+    );
+  });
+
+  it("sends no Authorization header when EVALOPS_API_KEY is unset", async () => {
+    const fetchMock = stubFetch(new Response("{}", { status: 200 }));
+    await GET(request("/api/projects"), ctx("projects"));
+    const [, init] = fetchMock.mock.calls[0]!;
+    expect((init.headers as Headers).has("authorization")).toBe(false);
+  });
+
+  it("overrides whatever Authorization the browser sent -- the server decides, never the client", async () => {
+    vi.stubEnv("EVALOPS_API_KEY", "s3cr3t-server-key");
+    const fetchMock = stubFetch(new Response("{}", { status: 200 }));
+
+    await GET(
+      request("/api/projects", {
+        headers: { authorization: "Bearer whatever-the-browser-sent" },
+      }),
+      ctx("projects"),
+    );
+
+    const [, init] = fetchMock.mock.calls[0]!;
+    expect((init.headers as Headers).get("authorization")).toBe(
+      "Bearer s3cr3t-server-key",
+    );
+  });
+
+  it("drops a browser-supplied Authorization header when no key is configured", async () => {
+    const fetchMock = stubFetch(new Response("{}", { status: 200 }));
+    await GET(
+      request("/api/projects", {
+        headers: { authorization: "Bearer whatever-the-browser-sent" },
+      }),
+      ctx("projects"),
+    );
+    const [, init] = fetchMock.mock.calls[0]!;
+    expect((init.headers as Headers).has("authorization")).toBe(false);
+  });
+
+  it("never lets the configured key reach the response returned to the browser", async () => {
+    vi.stubEnv("EVALOPS_API_KEY", "s3cr3t-server-key");
+    stubFetch(new Response(JSON.stringify({ ok: true }), { status: 200 }));
+
+    const response = await GET(request("/api/projects"), ctx("projects"));
+
+    const bodyText = await response.text();
+    expect(bodyText).not.toContain("s3cr3t-server-key");
+    for (const [key, value] of response.headers.entries()) {
+      expect(`${key}:${value}`).not.toContain("s3cr3t-server-key");
+    }
+  });
+});
+
 describe("api proxy route — upstream/network failure", () => {
   it("returns a clean 502 without leaking the underlying error", async () => {
     const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});

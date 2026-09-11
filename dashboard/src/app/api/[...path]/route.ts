@@ -22,6 +22,12 @@ import type { NextRequest } from "next/server";
  *
  * `API_PROXY_TARGET` is read only here, server-side; it is never sent to the
  * browser or referenced by client code.
+ *
+ * CP 10.5: when the API requires a key, `EVALOPS_API_KEY` is likewise read
+ * only here (never a `NEXT_PUBLIC_*` variable, never referenced by client
+ * code) and attached as `Authorization: Bearer <key>` on the *outgoing*
+ * request to FastAPI -- the browser never sees it, and cannot influence it
+ * either: any `Authorization` header the browser sent is stripped first.
  */
 export const runtime = "nodejs";
 // A proxy response must never be served from a cache or statically optimized.
@@ -44,7 +50,15 @@ const HOP_BY_HOP_HEADERS = [
 
 // Request-only: recomputed by `fetch()` itself from the target URL / body, or
 // would otherwise leak this server's negotiation to the upstream unnecessarily.
-const STRIP_FROM_REQUEST = [...HOP_BY_HOP_HEADERS, "host", "content-length", "accept-encoding"];
+// `authorization` is stripped unconditionally -- this server decides what
+// credential (if any) reaches the API, never the browser.
+const STRIP_FROM_REQUEST = [
+  ...HOP_BY_HOP_HEADERS,
+  "host",
+  "content-length",
+  "accept-encoding",
+  "authorization",
+];
 
 // Response-only: the body may no longer match these once it has passed
 // through `fetch()` (which transparently decodes a compressed response), and
@@ -79,10 +93,13 @@ async function handle(
   const { path } = await context.params;
   const url = upstreamUrl(path, request.nextUrl.search);
 
-  const init: RequestInit = {
-    method: request.method,
-    headers: filteredHeaders(request.headers, STRIP_FROM_REQUEST),
-  };
+  const headers = filteredHeaders(request.headers, STRIP_FROM_REQUEST);
+  const apiKey = process.env.EVALOPS_API_KEY;
+  if (apiKey) {
+    headers.set("authorization", `Bearer ${apiKey}`);
+  }
+
+  const init: RequestInit = { method: request.method, headers };
   if (!METHODS_WITHOUT_BODY.has(request.method) && request.body !== null) {
     // The dashboard only ever sends small JSON bodies (see lib/api/client.ts)
     // -- buffering is simpler and easier to test than streaming with the

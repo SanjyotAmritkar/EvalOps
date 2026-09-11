@@ -15,8 +15,9 @@
 # Internal service hostnames (postgres, redis, api) are Compose's own DNS and
 # are fixed below -- they are not meant to be overridden from a local `.env`,
 # which uses `localhost` for the *non-containerized* dev flow instead (see
-# .env.example). Only genuinely user-supplied values (provider keys, log
-# level/format, concurrency, build metadata) are read from the environment.
+# .env.example). Only genuinely user-supplied values (provider keys, the API
+# key, CORS origins, log level/format, concurrency, build metadata) are read
+# from the environment.
 #
 # Postgres and Redis are intentionally NOT published to the host here (CP 10.4
 # security baseline: internal dependencies stay internal); uncomment their
@@ -39,6 +40,14 @@ x-backend-image: &backend-image
     OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
     OPENAI_API_KEY: ${OPENAI_API_KEY:-}
     ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+    # CP 10.5: this stack runs with EVALOPS_ENV=production by default, so the
+    # API now refuses to start without a key (see
+    # src/evalops/security/settings.py) -- put one in your `.env`
+    # (`openssl rand -hex 32`) before `docker compose up`. Blank
+    # EVALOPS_CORS_ALLOWED_ORIGINS is fine: the dashboard never calls the API
+    # cross-origin, only through its own server-side proxy.
+    EVALOPS_API_KEY: ${EVALOPS_API_KEY:?set EVALOPS_API_KEY in .env -- see .env.example}
+    EVALOPS_CORS_ALLOWED_ORIGINS: ${EVALOPS_CORS_ALLOWED_ORIGINS:-}
 
 services:
   postgres:
@@ -164,6 +173,10 @@ services:
       dockerfile: Dockerfile
     environment:
       API_PROXY_TARGET: http://api:8000
+      # Same key as the backend image's EVALOPS_API_KEY above -- attached
+      # server-side to the proxy's outgoing request (src/app/api/[...path]/
+      # route.ts); never sent to the browser.
+      EVALOPS_API_KEY: ${EVALOPS_API_KEY:?set EVALOPS_API_KEY in .env -- see .env.example}
     ports:
       - "3000:3000"
     depends_on:

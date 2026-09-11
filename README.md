@@ -264,9 +264,11 @@ a feature is listed under **SHIPPED** only if its full path actually works today
   both must wait on (`service_completed_successfully`) before starting, so
   migrations never race; a multi-stage Next.js **standalone** image
   (`dashboard/Dockerfile`) serves the dashboard, its `/api/*` proxy moved from
-  a build-time-baked `next.config.ts` rewrite into a request-time Proxy
-  (`src/proxy.ts`) so the same built image can point at any API location via
-  `API_PROXY_TARGET` at container start. Container health checks reuse the
+  a build-time-baked `next.config.ts` rewrite into a request-time server-side
+  proxy (`src/app/api/[...path]/route.ts` — a Node.js-runtime Route Handler;
+  see CP 10.5 below for why it isn't Proxy/Middleware) so the same built image
+  can point at any API location via `API_PROXY_TARGET` at container start.
+  Container health checks reuse the
   CP 10.3 `/health`/`/ready` endpoints and Celery's own `inspect ping` — no new
   health mechanism. The worker deliberately keeps Celery's **at-most-once**
   task delivery (`task_acks_late=False`) so a crashed worker is never
@@ -278,6 +280,29 @@ a feature is listed under **SHIPPED** only if its full path actually works today
   create → async-run → Celery execution → persisted PASS/BLOCK decision →
   full-stack restart with data intact, all correlated end-to-end by the
   CP 10.3 `request_id`. See `docs/ARCHITECTURE.md` §7.10.
+- **API security + Azure production deployment** (Phase 10, CP 10.5) — a
+  single portfolio-scale **API key** (`EVALOPS_API_KEY`, `Authorization:
+  Bearer <key>`, constant-time comparison, `evalops.security`) protects every
+  route except `/health`/`/ready` (platform probes stay open); unset, it is a
+  no-op (every existing local/dev/test flow is unaffected), but the API now
+  **refuses to start** with `EVALOPS_ENV=production` and no key configured.
+  The dashboard's server-side proxy attaches the key itself
+  (`EVALOPS_API_KEY`, server-only, never sent to the browser); curl/CLI usage
+  authenticates the same way. Baseline security response headers, and CORS
+  that is off by default (no wildcard, no credentials, opt-in origins only —
+  the dashboard never calls the API cross-origin, only through its own
+  proxy). Interactive `/docs`/`/redoc`/`/openapi.json` are disabled in
+  production. The already-verified Azure Container Apps topology (dashboard /
+  API / worker Container Apps, a Container Apps Job for migrations, ACR,
+  managed identity + `AcrPull`, PostgreSQL Flexible Server, Redis as a
+  Container App) is now codified as reproducible scripts
+  (`deploy/azure/*.sh`) and a manually-triggered, OIDC-authenticated GitHub
+  Actions workflow (`.github/workflows/deploy-azure.yml` — no stored Azure
+  password/service-principal secret) that runs the same checks CI runs, builds
+  linux/amd64 images tagged with the immutable commit SHA, runs the migration
+  job and stops if it fails, then rolls `api`/`worker`/`dashboard` forward and
+  smoke-checks them. See `docs/ARCHITECTURE.md` §7.11 and
+  `deploy/azure/README.md`.
 
 ### NOT YET SHIPPED
 
@@ -500,7 +525,10 @@ production-shaped container stack, with the same evaluation/gate/persistence
 semantics as the flows above:
 
 ```bash
-cp .env.example .env    # fill in OPENAI_API_KEY / ANTHROPIC_API_KEY only if you need them
+cp .env.example .env
+# Required as of CP 10.5 -- this stack runs with EVALOPS_ENV=production by
+# default, and the API now refuses to start in production without a key:
+echo "EVALOPS_API_KEY=$(openssl rand -hex 32)" >> .env
 docker compose up --build
 open http://localhost:3000
 ```
@@ -557,6 +585,55 @@ hard-coded guess.
 Stop everything with `docker compose down` (add `-v` only if you want to
 delete the `postgres_data` volume and start clean).
 
+### API security (Phase 10, CP 10.5)
+
+A single API key (`EVALOPS_API_KEY`), not OAuth/user accounts/RBAC —
+appropriate for a portfolio deployment, not a claim of enterprise auth. Unset,
+every request is allowed (local dev / the test suite are unaffected); set,
+every route except `GET /health`/`GET /ready` requires
+`Authorization: Bearer <key>` (constant-time comparison, `evalops.security`).
+`EVALOPS_ENV=production` **requires** it — the API refuses to start otherwise.
+The dashboard's server-side proxy (`dashboard/src/app/api/[...path]/route.ts`)
+attaches the same key itself from its own `EVALOPS_API_KEY`; it never reaches
+the browser. CORS is off by default (no wildcard, no credentials — set
+`EVALOPS_CORS_ALLOWED_ORIGINS` only for a genuine direct-from-browser
+integration; the dashboard itself never needs it). See
+`docs/ARCHITECTURE.md` §7.11 for the full model and its limitations.
+
+### Deploy to Azure (production, Phase 10, CP 10.5)
+
+The proven Azure topology — Container Apps for dashboard/API/worker, a
+Container Apps Job for migrations, ACR, managed identity + `AcrPull`,
+PostgreSQL Flexible Server, Redis as a Container App — is codified as
+reproducible scripts and a GitHub Actions workflow rather than click-ops:
+
+- **One-time setup, fresh subscription**: `deploy/azure/00-provision-infra.sh` →
+  `deploy/azure/01-provision-apps.sh` → `deploy/azure/03-github-oidc.sh`, then
+  configure the repo's `production` GitHub Environment (required reviewers +
+  the variable names `03-github-oidc.sh` prints).
+- **Already-provisioned Container Apps** (created by hand): run
+  `deploy/azure/04-adopt-existing.sh` instead — it only wires up the new
+  `EVALOPS_API_KEY`/`EVALOPS_ENV` settings on the existing apps and never
+  recreates infrastructure. Never run `00-provision-infra.sh` /
+  `01-provision-apps.sh` against resources they didn't create.
+- Full walkthrough, variable/secret table, and the honest tradeoffs
+  (Redis-as-Container-App, Postgres public access) are in
+  **`deploy/azure/README.md`** — read that before running anything.
+- **Every deploy after setup**: Actions tab → "Deploy to Azure (production)" →
+  Run workflow. The same checks CI runs always run first. Blank `image_tag`
+  then builds the checked-out commit and pushes it to ACR; a supplied
+  `image_tag` skips the build entirely and redeploys/rolls back that existing
+  ACR tag **without rebuilding it** (and without ever overwriting it). Either
+  way: OIDC login (no stored Azure password/service-principal secret) → run
+  the Alembic migration job (the deploy stops here if it fails) → roll
+  `api`/`worker`/`dashboard` forward, each with a deploy-unique revision
+  suffix → a bounded post-deploy health/smoke check, including a call through
+  the dashboard's proxy — with no credential supplied by the workflow — to
+  prove its server-side API-key injection actually works.
+- No Terraform/Bicep — plain, reviewable `az` CLI scripts
+  (`deploy/azure/*.sh`), each idempotent (safe to re-run) and independently
+  shellcheck-clean.
+
 ### Repository layout
 
 ```
@@ -567,6 +644,7 @@ docs/             architecture & project reference
 .github/          CI workflows
 Dockerfile        backend image (API / worker / migration job)
 docker-compose.yml  full containerized stack (Phase 10, CP 10.4)
+deploy/azure/     Azure deployment scripts + docs (Phase 10, CP 10.5)
 ```
 
 Additional top-level directories (`datasets/`, `dashboard/`, `infra/`, ...) are

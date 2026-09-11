@@ -782,6 +782,113 @@ is runtime hardening, not an architecture rewrite.
   `docker` job, GitHub Actions cache) to catch a broken build early; nothing
   is pushed to a registry yet.
 
+### 7.11 Implemented: API security + Azure production deployment (Phase 10, CP 10.5)
+
+Formalizes the already-working Azure deployment into reproducible assets and
+adds the minimum security a production deployment needs -- **no architecture
+change**: same evaluation/gate/persistence/Celery semantics as every prior
+checkpoint.
+
+* **API-key authentication** (`src/evalops/security/`) -- one flat portfolio
+  key, not OAuth/user accounts/RBAC (explicitly out of scope; see §3 non-goals).
+  `require_api_key` (`evalops/security/auth.py`) is a FastAPI dependency
+  attached per-router to every router except `health` (platform liveness/
+  readiness probes must stay reachable unauthenticated); it reads
+  `EVALOPS_API_KEY` fresh per request, so it is a **no-op when unset** --
+  every existing local-dev flow and the entire pre-CP-10.5 test suite are
+  unaffected. When set, `Authorization: Bearer <key>` is required
+  (`fastapi.security.HTTPBearer`, `auto_error=False` so a uniform 401 is
+  returned rather than FastAPI's default); comparison is
+  `hmac.compare_digest` (constant-time). One key, no roles, so only 401
+  (unauthenticated) is ever returned -- 403 ("authenticated but forbidden")
+  does not apply to a flat single-key scheme. **Startup validation**
+  (`validate_production_config`, called once from `create_app`, never on a
+  request path) raises `ProductionConfigError` -- refusing to start the
+  process -- when `EVALOPS_ENV=production` and no key is configured; a
+  misconfigured production container must crash-loop loudly, not silently
+  serve unauthenticated.
+* **Dashboard proxy auth** -- `dashboard/src/app/api/[...path]/route.ts`
+  (the Node.js Route Handler proxy from the CP 10.4 follow-up) reads its own
+  `EVALOPS_API_KEY` (server-only env var, never `NEXT_PUBLIC_*`) and sets
+  `Authorization: Bearer <key>` on the *outgoing* request to FastAPI,
+  unconditionally overwriting whatever (if anything) the browser sent --
+  the browser can neither see nor influence the real key. Direct/CLI usage
+  (`curl -H "Authorization: Bearer $EVALOPS_API_KEY"`) authenticates through
+  the identical mechanism.
+* **HTTP security** (`src/evalops/security/headers.py`,
+  `fastapi.middleware.cors.CORSMiddleware`) -- a small, JSON-API-appropriate
+  set of response headers (`X-Content-Type-Options`, `X-Frame-Options`,
+  `Referrer-Policy`, `Cross-Origin-Opener-Policy`, `Strict-Transport-Security`;
+  no bespoke Content-Security-Policy, since this is not an HTML app and
+  `/docs`/`/redoc`/`/openapi.json` are disabled outright when
+  `EVALOPS_ENV=production`). CORS is **off by default**
+  (`EVALOPS_CORS_ALLOWED_ORIGINS` empty -> no `CORSMiddleware` at all, no
+  wildcard, `allow_credentials=False` always -- this API uses no cookies) --
+  deliberately so, because the dashboard talks to the API through its own
+  server-side proxy, which is never subject to browser CORS in the first
+  place; CORS here is defense-in-depth for a hypothetical direct-from-browser
+  integration, not load-bearing for normal operation.
+* **Azure deployment, codified** (`deploy/azure/`) -- the topology already
+  verified manually (dashboard/API/worker as Azure Container Apps, a
+  Container Apps Job for `alembic upgrade head`, ACR with no admin user,
+  a user-assigned managed identity granted only `AcrPull` for runtime image
+  pulls, PostgreSQL Flexible Server, Redis running as its own internal-only
+  Container App) is now four small, shellcheck-clean, idempotent `az` CLI
+  scripts (`00-provision-infra.sh` → `01-provision-apps.sh` →
+  `03-github-oidc.sh`, then the repeatable `02-deploy.sh`) plus
+  `deploy/azure/README.md`. No Terraform/Bicep: the topology is small enough
+  that plain, reviewable scripts stay more maintainable than an IaC layer
+  (per §3/§5.3's existing "no Terraform, no Kubernetes required" position).
+  A *separate* identity (not the runtime `AcrPull` one) is granted `AcrPush` +
+  `Container Apps Contributor` + `Container Apps Jobs Contributor`, scoped to
+  one resource group, and trusted only for GitHub Actions runs under this
+  repo's `production` Environment via an OIDC federated credential -- no Azure
+  password or service-principal secret is ever stored in GitHub.
+* **GitHub Actions deployment workflow**
+  (`.github/workflows/deploy-azure.yml`) -- `workflow_dispatch` only, gated by
+  the `production` Environment's required-reviewer rule (the actual approval
+  gate, not the trigger itself). A blank `image_tag` input builds the
+  checked-out commit (checks -> build+push linux/amd64 images to ACR tagged
+  with the immutable commit SHA, and `:latest` for convenience only) before
+  deploying; a **supplied** `image_tag` (rollback/redeploy of a known-good
+  tag) **skips the build job entirely** and the deploy job first verifies
+  that exact tag already exists in ACR -- an immutable tag already pushed is
+  never overwritten with whatever happens to be checked out. Either path then
+  updates the migration Job's image and runs it, **stopping before touching
+  api/worker/dashboard if the migration does not succeed**. On success it
+  rolls all three Container Apps forward with `EVALOPS_REVISION` set to the
+  full deployed tag and a **`--revision-suffix` unique per deploy run**
+  (`sha-<12-char-tag-prefix>-<unix-timestamp>` -- a timestamp, not just the
+  tag, so redeploying the identical tag twice never collides with a
+  still-existing revision name), then runs a bounded smoke check: API
+  `/health`/`/ready`, the dashboard's root, and
+  `https://<dashboard-fqdn>/api/projects` with no credential supplied by the
+  workflow -- a 2xx there proves the dashboard's server-side proxy injected
+  its own `EVALOPS_API_KEY` correctly without the runner ever holding that
+  key. Existing runtime secrets (`DATABASE_URL`, `EVALOPS_API_KEY`, provider
+  keys) are never re-supplied by the workflow -- they already exist as
+  Container Apps secrets from the one-time provisioning scripts (or from
+  `deploy/azure/04-adopt-existing.sh` for a deployment that already existed
+  before these scripts did) and are referenced only by name.
+* **Tradeoffs documented, not hidden** (`deploy/azure/README.md`) -- Redis
+  runs as a Container App (`redis:7-alpine`, no persistence, single replica),
+  the portfolio/free-tier-compatible choice, explicitly **not** presented as
+  the ideal managed-Redis architecture (swapping in Azure Cache for Redis
+  later is a `CELERY_BROKER_URL` change, nothing else); PostgreSQL Flexible
+  Server uses `--public-access 0.0.0.0` (Azure-services-only, not the public
+  internet) rather than a private VNet, because this topology has no VNet.
+* **Configuration** -- `.env.example` / `dashboard/.env.example` gained
+  `EVALOPS_API_KEY` and `EVALOPS_CORS_ALLOWED_ORIGINS` placeholders (blank by
+  default); `docker-compose.yml` (which already defaults
+  `EVALOPS_ENV=production`, CP 10.4) now requires `EVALOPS_API_KEY` via
+  Compose's `${VAR:?err}` -- a clear config-time error instead of a
+  container that crash-loops with no explanation.
+
+No dashboard redesign, no Kubernetes, no Kafka, no service mesh, no OAuth/full
+identity platform, no arbitrary provider retries, no change to Celery/Redis
+architecture or at-most-once evaluation semantics -- all unchanged from
+CP 10.4 and earlier.
+
 ---
 
 ## 8. Statistical Rigor
@@ -1140,9 +1247,21 @@ This prevents the failure mode where a reviewer opens a module and finds an unfi
 
 ## 14. Deployment
 
-- Local: single `docker compose up` brings up frontend, backend, worker, redis, postgres
-- Hosted (one instance is enough): frontend → Vercel; backend + worker → Render/Fly.io/ECS; Postgres → managed Postgres; Redis → managed Redis
-- No Terraform, no Kubernetes required for this project's scope
+- **Local**: `docker compose up` (repo root `docker-compose.yml`, Phase 10
+  CP 10.4) brings up dashboard, API, worker, Redis, Postgres as one
+  production-shaped stack.
+- **Hosted (implemented, Phase 10 CP 10.5)**: Azure Container Apps for the
+  dashboard, API, and worker; a Container Apps Job for the Alembic migration;
+  ACR (no admin user, pulled via managed identity); PostgreSQL Flexible
+  Server; Redis as its own internal-only Container App (a portfolio/
+  free-tier-compatible choice, not a claim that it is the ideal managed-Redis
+  architecture -- see `deploy/azure/README.md`). Deployed via a manually
+  triggered, OIDC-authenticated GitHub Actions workflow
+  (`.github/workflows/deploy-azure.yml`); provisioned via reproducible `az`
+  CLI scripts (`deploy/azure/*.sh`), not click-ops. See §7.11.
+- **No Terraform/Bicep, no Kubernetes** -- the topology above is small enough
+  that plain, reviewable scripts stay more maintainable than an IaC layer for
+  this project's scope.
 
 ## 15. Positioning Notes
 

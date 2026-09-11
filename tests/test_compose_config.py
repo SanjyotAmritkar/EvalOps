@@ -96,10 +96,22 @@ def test_no_privileged_containers_or_docker_socket_mounts() -> None:
 
 
 def test_no_secret_is_hard_coded_as_a_literal_value() -> None:
-    # Provider keys must flow through `${VAR}` substitution, never a literal.
+    # Provider keys and the API key must flow through `${VAR}` substitution,
+    # never a literal.
     doc = _load()
     for service in doc["services"].values():
         env = service.get("environment", {})
-        for key in ("OPENAI_API_KEY", "ANTHROPIC_API_KEY"):
+        for key in ("OPENAI_API_KEY", "ANTHROPIC_API_KEY", "EVALOPS_API_KEY"):
             if key in env:
                 assert str(env[key]).startswith("${"), f"{key} must not be a literal value"
+
+
+def test_api_and_dashboard_require_evalops_api_key_to_be_set() -> None:
+    # CP 10.5: this stack runs with EVALOPS_ENV=production by default, so a
+    # missing key must stop `docker compose up` at config-resolution time
+    # (Compose's `${VAR:?err}`), not let the containers crash-loop -- and
+    # never silently fall back to no auth via `${VAR:-}`.
+    doc = _load()
+    for name in ("api", "worker", "migrate", "dashboard"):
+        env = doc["services"][name]["environment"]
+        assert env["EVALOPS_API_KEY"].startswith("${EVALOPS_API_KEY:?")
