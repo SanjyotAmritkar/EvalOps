@@ -18,7 +18,11 @@ from evalops.db.engine import database_url
 config = context.config
 
 if config.config_file_name is not None:
-    fileConfig(config.config_file_name)
+    # ``disable_existing_loggers=False``: this configures Alembic's own logging
+    # without silently disabling the application's loggers (``evalops.*``), which
+    # matters when migrations run in-process (e.g. the schema tests) alongside
+    # code that relies on ``evalops.obs`` structured logging.
+    fileConfig(config.config_file_name, disable_existing_loggers=False)
 
 target_metadata = Base.metadata
 

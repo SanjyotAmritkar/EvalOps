@@ -55,6 +55,7 @@ from evalops.evaluators import build_evaluators
 from evalops.execution_service import execute_experiment
 from evalops.gate import evaluate_gate
 from evalops.judge import LLMJudge
+from evalops.obs.context import correlation_scope
 from evalops.promotion import promote_traces_to_dataset
 from evalops.runner import RunOutcome
 from evalops.worker.tasks import DispatchError, enqueue_experiment_run
@@ -281,12 +282,13 @@ def run_experiment_route(experiment_id: str, body: RunRequest, session: SessionD
     # Orchestration (load, run, persist, gate) lives in the execution service;
     # the route only adapts the HTTP request. The request-scoped session's unit
     # of work owns the transaction.
-    return execute_experiment(
-        session,
-        experiment_id,
-        body.execution.to_spec(),
-        [spec.model_dump(exclude_none=True) for spec in body.evaluators],
-    )
+    with correlation_scope(experiment_id=experiment_id):
+        return execute_experiment(
+            session,
+            experiment_id,
+            body.execution.to_spec(),
+            [spec.model_dump(exclude_none=True) for spec in body.evaluators],
+        )
 
 
 @experiments.post("/experiments/{experiment_id}/run-async", status_code=status.HTTP_202_ACCEPTED)
@@ -303,17 +305,18 @@ def run_experiment_async_route(
     problems (e.g. a bad evaluator config) surface later as a ``failed`` job.
     """
     _found(ExperimentRepository(session).get(experiment_id), "experiment not found")
-    try:
-        job = enqueue_experiment_run(
-            experiment_id,
-            body.execution.model_dump(),
-            [spec.model_dump(exclude_none=True) for spec in body.evaluators],
-            sessions=sessions,
-        )
-    except DispatchError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc)
-        ) from exc
+    with correlation_scope(experiment_id=experiment_id):
+        try:
+            job = enqueue_experiment_run(
+                experiment_id,
+                body.execution.model_dump(),
+                [spec.model_dump(exclude_none=True) for spec in body.evaluators],
+                sessions=sessions,
+            )
+        except DispatchError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc)
+            ) from exc
     return AsyncJobRead.of(job)
 
 

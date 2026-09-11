@@ -16,6 +16,7 @@ from celery import Celery
 from sqlalchemy.orm import Session, sessionmaker
 
 from evalops.db import session_factory
+from evalops.obs.logging import configure_logging
 
 #: Local development default; overridden by ``CELERY_BROKER_URL``.
 DEFAULT_BROKER_URL = "redis://localhost:6379/0"
@@ -27,6 +28,9 @@ def broker_url() -> str:
 
 
 def create_celery_app() -> Celery:
+    # Structured logging for the worker process too (root logger is not hijacked;
+    # see worker_hijack_root_logger below).
+    configure_logging()
     app = Celery("evalops", broker=broker_url())
     app.conf.update(
         task_serializer="json",

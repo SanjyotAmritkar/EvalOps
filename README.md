@@ -233,6 +233,29 @@ a feature is listed under **SHIPPED** only if its full path actually works today
   a PASS/BLOCK decision, add a gate, or run a second statistical engine.** No
   change to statistical thresholds, `MIN_PAIRS_TO_BLOCK`, release-policy
   semantics, or the async execution path.
+- **Production observability + operational health** (Phase 10, CP 10.3) — a
+  small coherent `evalops.obs` layer, standard library only. Centralised
+  **structured JSON logging** (`configure_logging` / `log_event`) with stable
+  event names (`http_request_completed`, `async_job_queued/started/completed/
+  failed`, `experiment_started/completed`, `release_decision_computed`,
+  `provider_call_completed/failed`) instead of scattered prose logs. A pure-ASGI
+  `RequestContextMiddleware` resolves/validates `X-Request-ID` (generating one
+  when absent), echoes it on the response, and logs one completion event per
+  request; `contextvars`-based correlation (`request_id` / `project_id` /
+  `experiment_id` / `job_id` / `celery_task_id`) propagates concurrency-safely
+  from an HTTP request through the async job to the Celery task and the
+  experiment/provider calls beneath it, with no process-global mutable state.
+  `GET /health` (liveness, no dependency) is now distinct from `GET /ready`
+  (PostgreSQL + Redis connectivity, correct 503 when a required one is down,
+  Redis correctly optional via `EVALOPS_REQUIRE_REDIS=false`); both carry safe
+  build metadata (service/version/environment/revision from the environment,
+  never fabricated). A redaction helper (`evalops.obs.redact`) strips
+  credential-shaped substrings from any logged exception; prompts, model
+  output, dataset/trace content and API keys are never logged. No new
+  execution path, no retries, no evaluation/gate/statistical/diagnostics
+  semantics change. OpenTelemetry was evaluated and explicitly deferred —
+  structured logs + correlation ids are sufficient for this checkpoint (see
+  `docs/ARCHITECTURE.md` §7.9).
 
 ### NOT YET SHIPPED
 

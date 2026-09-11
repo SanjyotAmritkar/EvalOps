@@ -9,6 +9,8 @@ release decision -- those belong to later checkpoints.
 
 from __future__ import annotations
 
+import logging
+import time
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 
@@ -24,7 +26,11 @@ from evalops.domain.entities import (
 from evalops.domain.enums import ProviderName
 from evalops.domain.value_objects import UsageMetrics
 from evalops.errors import ConfigError
+from evalops.obs.logging import get_logger, log_event
+from evalops.obs.redact import safe_error
 from evalops.prompt import render_prompt
+
+_logger = get_logger("provider")
 
 
 @dataclass(frozen=True, slots=True)
@@ -84,9 +90,26 @@ def _execute(
     prompt: str,
     provider: ProviderClient,
 ) -> EvaluationRun:
+    started = time.perf_counter()
     try:
         response = provider.complete(prompt, system_version)
     except ProviderError as exc:
+        # One WARNING per failed provider call -- the failure is meaningful even
+        # in a large run; success is logged at DEBUG (see below). No prompt or
+        # output, ever.
+        log_event(
+            _logger,
+            "provider_call_failed",
+            level=logging.WARNING,
+            provider=system_version.provider.value,
+            model=system_version.model,
+            case_id=case.id,
+            repeat_index=repeat_index,
+            duration_ms=round((time.perf_counter() - started) * 1000, 3),
+            outcome="error",
+            error_type=type(exc).__name__,
+            error=safe_error(exc),
+        )
         return EvaluationRun(
             experiment_id=experiment.id,
             system_version_id=system_version.id,
@@ -96,6 +119,22 @@ def _execute(
             usage=UsageMetrics(),
             error=str(exc).strip() or type(exc).__name__,
         )
+    log_event(
+        _logger,
+        "provider_call_completed",
+        level=logging.DEBUG,
+        provider=system_version.provider.value,
+        model=system_version.model,
+        case_id=case.id,
+        repeat_index=repeat_index,
+        duration_ms=round((time.perf_counter() - started) * 1000, 3),
+        outcome="success",
+        # Existing usage metadata only -- never fabricated.
+        prompt_tokens=response.usage.prompt_tokens,
+        completion_tokens=response.usage.completion_tokens,
+        cost_usd=response.usage.cost_usd,
+        provider_latency_ms=response.usage.latency_ms,
+    )
     return EvaluationRun(
         experiment_id=experiment.id,
         system_version_id=system_version.id,

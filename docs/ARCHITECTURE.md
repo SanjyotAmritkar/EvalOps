@@ -583,6 +583,86 @@ gate.
   computation is pure, deterministic, and independently tested
   (`tests/test_diagnostics.py`, `tests/test_api_diagnostics.py`).
 
+### 7.9 Implemented: production observability + operational health (Phase 10, CP 10.3)
+
+Visibility across `HTTP request → API → async job → Celery task → experiment
+execution → provider call → persisted result`, added as one small coherent
+layer (`evalops.obs`, standard library only) rather than logging calls
+scattered through the codebase. **No evaluation, statistical, gate,
+diagnostics, persistence, or provider-behaviour change.**
+
+* **Structured logging** (`evalops.obs.logging`) — one JSON object per line by
+  default (`EVALOPS_LOG_FORMAT=console` for a compact dev line), via a stdlib
+  `logging.Handler` on the root logger. `log_event(logger, event, **fields)` is
+  the only call-site API: `event` is a **stable name**
+  (`http_request_completed`, `async_job_queued` / `_started` / `_completed` /
+  `_failed`, `experiment_started` / `_completed`, `release_decision_computed`,
+  `provider_call_completed` / `_failed`), never a prose message. The
+  correlation context (below) is merged into every event automatically. Root
+  stays at `WARNING` and the `evalops` logger tree at the configured level (`
+  EVALOPS_LOG_LEVEL`, default `INFO`) so third-party `INFO` chatter (`httpx`,
+  `celery`) does not flood the log, while `evalops.*` events still reach the
+  handler by propagation. Per-call provider success is logged at `DEBUG`
+  (a large dataset would otherwise emit one `INFO` line per case × repeat ×
+  version); provider failures and job/experiment failures are `WARNING`/`ERROR`.
+* **Correlation** (`evalops.obs.context`) — a single `contextvars.ContextVar`
+  holds `request_id` / `project_id` / `experiment_id` / `job_id` /
+  `celery_task_id`. `bind` / `reset` / the `correlation_scope` context manager
+  merge and restore it; there is no process-global mutable dict, so concurrent
+  `asyncio` tasks and threads never see each other's ids. `request_id`
+  (+ `experiment_id`) is captured by `snapshot_for_dispatch()` and passed as an
+  explicit argument on `execute_experiment_task.delay(...)` — Celery has no
+  built-in context propagation, so the correlation travels as ordinary task
+  payload, not a global. The worker re-binds it (`job_id` / `celery_task_id`
+  added) for the lifetime of the task.
+* **HTTP** (`evalops.obs.middleware.RequestContextMiddleware`) — a **pure ASGI**
+  middleware, not `BaseHTTPMiddleware` (which runs the downstream app in a
+  child task where a contextvar set in `dispatch` would not be visible to the
+  endpoint). Resolves an incoming `X-Request-ID` if it matches
+  `^[A-Za-z0-9._-]{1,128}$`, else generates one; echoes it on the response;
+  logs exactly one `http_request_completed` (or `_failed`) per request with
+  method, the **templated route** (never the raw path with a query string),
+  status, and duration. Never logs the body, `Authorization`, cookies, or other
+  headers. An exception unhandled by FastAPI's own exception middleware (a true
+  bug) is logged but bypasses the `X-Request-ID` response header, because
+  Starlette's outermost `ServerErrorMiddleware` generates that response itself.
+* **Provider instrumentation** is centralised once, in `runner._execute` (the
+  single call site both the sync and async paths already funnel through) —
+  not duplicated per adapter. Captures `provider`, `model`, `duration_ms`,
+  `outcome`, and the *existing* usage fields (`prompt_tokens`,
+  `completion_tokens`, `cost_usd`) already returned by every provider; nothing
+  is fabricated. Never logs the prompt or the completion text.
+* **Health vs. readiness** (`evalops.api.health`) — `GET /health` is a liveness
+  check: always 200, consults no dependency. `GET /ready` checks PostgreSQL
+  (`SELECT 1`, read-only) and, when Redis/Celery is required
+  (`EVALOPS_REQUIRE_REDIS`, default `true`), a Redis `PING`; the body reports
+  each component's status and whether it was required, and the route answers
+  503 only when a *required* component is down — an intentionally Redis-less
+  synchronous deployment can set `EVALOPS_REQUIRE_REDIS=false` and stay
+  `ready` on Redis being down. No LLM provider is ever part of readiness.
+* **Operational metadata** (`evalops.obs.settings.ObservabilitySettings`) —
+  service name, version (`evalops.__version__`, overridable via
+  `EVALOPS_VERSION`), environment (`EVALOPS_ENV`), and revision
+  (`EVALOPS_REVISION` / `GIT_SHA` / `GIT_COMMIT` / `SOURCE_COMMIT`, `null` when
+  none is set — never fabricated, never shelled out to `git`). Carried on both
+  health endpoints.
+* **Sanitisation** (`evalops.obs.redact`) — every logged exception message goes
+  through `safe_error` (bounded length, `Bearer <token>` / `api_key=...` /
+  `sk-...`-shaped substrings masked). Backend audit boundary: identifiers,
+  exception types, provider/operation names are safe to log; API keys,
+  `Authorization`, cookies, prompts, model output, dataset/trace content, and
+  full provider response bodies are not, and no new code path logs them.
+* **OpenTelemetry decision: deferred.** Per §3/§5.3 non-goals ("no
+  Prometheus/Grafana/OpenTelemetry until structured logging proves
+  insufficient") and Phase 10's own ordering (structured logging first, OTel
+  later), this checkpoint does not add OTel. The correlation-id + structured-
+  event model above already answers "what happened, in what order, for which
+  request/job/experiment" end to end without an external collector, exporter,
+  or additional dependency; a single-instance deployment has no distributed
+  trace to stitch together yet. OTel remains the natural next step once there
+  are multiple instances/services to correlate across process boundaries
+  (tracked for CP 10.6 / production polish), not before.
+
 ---
 
 ## 8. Statistical Rigor

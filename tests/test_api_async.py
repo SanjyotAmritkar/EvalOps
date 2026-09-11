@@ -78,10 +78,13 @@ def test_run_async_returns_202_queued_job_and_dispatches(
     )
 
     assert len(dispatched) == 1
-    job_id, execution, evaluators = dispatched[0]
+    job_id, execution, evaluators, correlation = dispatched[0]
     assert job_id == body["id"]
     assert execution["backend"] == "mock" and "timeout_seconds" in execution
     assert evaluators == [{"type": "contains", "case_sensitive": False}]
+    # CP 10.3: the originating request_id + experiment_id travel with the task.
+    assert re.fullmatch(r"[0-9a-f]{32}", correlation["request_id"])
+    assert correlation["experiment_id"] == runnable_experiment
 
     assert client.get(f"/jobs/{body['id']}").json() == body
 

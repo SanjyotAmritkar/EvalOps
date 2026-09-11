@@ -21,6 +21,8 @@ made durable by the surrounding unit of work.
 
 from __future__ import annotations
 
+import logging
+import time
 from collections.abc import Mapping, Sequence
 from typing import Any, TypeVar
 
@@ -43,8 +45,12 @@ from evalops.db import (
 )
 from evalops.evaluators import build_evaluators
 from evalops.execution import ExecutionSpec, build_providers, run_evaluation
+from evalops.obs.context import correlation_scope
+from evalops.obs.logging import get_logger, log_event
+from evalops.obs.redact import safe_error
 
 _T = TypeVar("_T")
+_logger = get_logger("execution")
 
 
 def _require(value: _T | None, kind: str, ref: str) -> _T:
@@ -113,31 +119,74 @@ def execute_experiment(
             experiment.release_policy_id,
         )
 
-    evaluators = build_evaluators(evaluator_specs)
-    providers = build_providers(execution, baseline, candidate)
+    with correlation_scope(experiment_id=experiment.id, project_id=experiment.project_id):
+        started = time.perf_counter()
+        log_event(
+            _logger,
+            "experiment_started",
+            dataset_id=experiment.dataset_id,
+            baseline_version_id=experiment.baseline_version_id,
+            candidate_version_id=experiment.candidate_version_id,
+            repeats=experiment.repeats,
+            evaluator_count=len(evaluator_specs),
+            backend=execution.backend,
+        )
+        try:
+            evaluators = build_evaluators(evaluator_specs)
+            providers = build_providers(execution, baseline, candidate)
+            evaluation = run_evaluation(
+                experiment,
+                dataset,
+                baseline,
+                candidate,
+                policy,
+                evaluators=evaluators,
+                providers=providers,
+            )
 
-    evaluation = run_evaluation(
-        experiment,
-        dataset,
-        baseline,
-        candidate,
-        policy,
-        evaluators=evaluators,
-        providers=providers,
-    )
+            log_event(
+                _logger,
+                "release_decision_computed",
+                decision=evaluation.gate.decision.value,
+                gated=evaluation.gate.gated,
+                blocking_metrics=len(evaluation.gate.reasons),
+                advisories=len(evaluation.gate.advisories),
+            )
 
-    for run in evaluation.outcome.runs:
-        runs_repo.add(run)
-    for case_result in evaluation.outcome.case_results:
-        runs_repo.add_case_result(case_result)
-    stored = EvaluationResultRepository(session).add(evaluation.result)
+            for run in evaluation.outcome.runs:
+                runs_repo.add(run)
+            for case_result in evaluation.outcome.case_results:
+                runs_repo.add_case_result(case_result)
+            stored = EvaluationResultRepository(session).add(evaluation.result)
+        except Exception as exc:
+            log_event(
+                _logger,
+                "experiment_failed",
+                level=logging.ERROR,
+                duration_ms=round((time.perf_counter() - started) * 1000, 3),
+                error_type=type(exc).__name__,
+                error=safe_error(exc),
+            )
+            raise
+
+        runs = list(evaluation.outcome.runs)
+        log_event(
+            _logger,
+            "experiment_completed",
+            evaluation_result_id=stored.id,
+            run_count=len(runs),
+            failure_count=sum(1 for r in runs if r.error is not None),
+            decision=evaluation.gate.decision.value,
+            gated=evaluation.gate.gated,
+            duration_ms=round((time.perf_counter() - started) * 1000, 3),
+        )
 
     return RunResponse.of(
         experiment=experiment,
         dataset=dataset,
         baseline=baseline,
         candidate=candidate,
-        runs=list(evaluation.outcome.runs),
+        runs=runs,
         result=evaluation.result,
         gate=evaluation.gate,
         evaluation_result_id=stored.id,
