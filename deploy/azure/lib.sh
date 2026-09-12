@@ -24,10 +24,15 @@ require_cmd() {
   command -v "$1" >/dev/null 2>&1 || die "'$1' is required on PATH but was not found"
 }
 
-# load_config [path] -- source deploy/azure/config.env (or the given path),
-# which must exist (never the committed .example template).
+# load_config -- source deploy/azure/config.env, which must exist (never the
+# committed .example template). Always resolves the path relative to this
+# file's own directory (deploy/azure); takes no argument -- every caller
+# script already `cd`s into deploy/azure before sourcing lib.sh, and some
+# (e.g. 02-deploy.sh) have their own unrelated positional CLI arguments, so
+# load_config must never be the thing consuming "$1".
 load_config() {
-  local path="${1:-$(dirname "${BASH_SOURCE[0]}")/config.env}"
+  local path
+  path="$(dirname "${BASH_SOURCE[0]}")/config.env"
   [ -f "$path" ] || die "$path not found -- copy config.env.example to config.env and fill it in"
   # shellcheck disable=SC1090
   source "$path"
