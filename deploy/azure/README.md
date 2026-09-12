@@ -53,7 +53,8 @@ resources they didn't create.
 ## One-time setup (fresh Azure subscription only)
 
 Prerequisites: `az login` already done, an Azure subscription, `bash`,
-`openssl`, `curl`, and (for the very first image) `docker` with `buildx`.
+`openssl`, `curl`, `python3` (used to parse the GitHub API response in
+`03-github-oidc.sh`), and (for the very first image) `docker` with `buildx`.
 
 ```bash
 cd deploy/azure
@@ -92,6 +93,15 @@ cp config.env.example config.env   # then fill in real names for your subscripti
    Contributor`, scoped only to this resource group), trusted via OIDC
    federated credential for this exact repo's `production` GitHub Environment
    -- no Azure password or service-principal secret is ever stored in GitHub.
+   The federated credential's subject is
+   `repo:<owner>@<owner_id>/<repo>@<repo_id>:environment:production` -- the
+   `@<id>` suffixes are GitHub's own immutable numeric owner/repo IDs, not
+   just the names, which GitHub's OIDC token actually includes. The script
+   resolves both from the GitHub REST API (works unauthenticated for a public
+   repo; set `GITHUB_TOKEN` -- any token with read access to the repo -- if
+   yours is private or you hit anonymous rate limits) and fails clearly if it
+   cannot. Safe to re-run: it creates the credential if absent, or updates it
+   if a previous run left a stale/name-only subject.
    Prints `AZURE_CLIENT_ID` / `AZURE_TENANT_ID` / `AZURE_SUBSCRIPTION_ID`.
 
 ## Adopt an existing (already-provisioned) deployment

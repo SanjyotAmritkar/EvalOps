@@ -1,2 +1,8 @@
 # Real values (resource names for your subscription) -- never the template.
 config.env
+
+# Generated secrets (Postgres password, EVALOPS_API_KEY) written by
+# 00-provision-infra.sh / 01-provision-apps.sh / 04-adopt-existing.sh. Every
+# comment in those scripts and in README.md says these are git-ignored --
+# they must actually be.
+.secrets/
