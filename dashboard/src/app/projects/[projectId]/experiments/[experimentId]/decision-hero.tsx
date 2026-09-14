@@ -2,32 +2,35 @@ import Link from "next/link";
 import { InfoHint } from "@/components/ui/info-hint";
 import { cn } from "@/lib/cn";
 import type { MetricLine } from "@/lib/api/types";
-import { blockingSentence, metricStatus } from "@/lib/release-decision";
+import {
+  blockingSentence,
+  decisionState,
+  metricStatus,
+  type DecisionState,
+} from "@/lib/release-decision";
 
-type HeroState = "pass" | "block" | "advisory" | "not-gated";
-
-const FRAME: Record<HeroState, string> = {
+const FRAME: Record<DecisionState, string> = {
   pass: "border-pass/40 bg-pass/5",
   block: "border-block/40 bg-block/5",
   advisory: "border-warn/40 bg-warn/5",
   "not-gated": "border-border bg-surface-raised",
 };
 
-const TOKEN: Record<HeroState, string> = {
+const TOKEN: Record<DecisionState, string> = {
   pass: "border-pass/50 bg-pass/10 text-pass",
   block: "border-block/50 bg-block/10 text-block",
   advisory: "border-warn/50 bg-warn/10 text-warn",
   "not-gated": "border-border bg-surface text-fg-muted",
 };
 
-const HEADLINE: Record<HeroState, string> = {
+const HEADLINE: Record<DecisionState, string> = {
   pass: "Ready to release",
   block: "Release blocked",
   advisory: "Passed with unverified concerns",
   "not-gated": "Comparison only",
 };
 
-const TOKEN_TEXT: Record<HeroState, string> = {
+const TOKEN_TEXT: Record<DecisionState, string> = {
   pass: "PASS",
   block: "BLOCK",
   advisory: "PASS",
@@ -54,13 +57,7 @@ export function DecisionHero({
   metrics: MetricLine[];
   policyHref?: string;
 }) {
-  const state: HeroState = !gated
-    ? "not-gated"
-    : decision === "block"
-      ? "block"
-      : advisories.length > 0
-        ? "advisory"
-        : "pass";
+  const state = decisionState({ gated, decision, advisories });
 
   const blocking = metrics.filter((m) => m.regression);
   const improved = metrics.filter((m) => metricStatus(m) === "improved");
@@ -85,7 +82,7 @@ export function DecisionHero({
         <h2 className="text-[22px] font-semibold leading-tight tracking-tight text-fg">
           {HEADLINE[state]}
         </h2>
-        <InfoHint label="What does the release decision mean?" />
+        <InfoHint label="What does the release decision mean?" term="pass" />
       </div>
 
       {state === "not-gated" ? (

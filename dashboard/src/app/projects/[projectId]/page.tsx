@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useParams } from "next/navigation";
+import { DecisionBadge } from "@/components/decision-badge";
 import { PageHeader } from "@/components/layout/page-header";
 import { LinkButton } from "@/components/ui/button";
 import { Steps } from "@/components/ui/steps";
@@ -156,9 +157,12 @@ export default function ProjectOverviewPage() {
                       {versionName(experiment.candidate_version_id)}
                     </span>
                   </span>
-                  <span className="text-[13px] text-fg-subtle">
-                    {datasetName(experiment.dataset_id)} ·{" "}
-                    {formatDateTime(experiment.created_at)}
+                  <span className="flex items-center gap-2 text-[13px] text-fg-subtle">
+                    <DecisionBadge experimentId={experiment.id} />
+                    <span>
+                      {datasetName(experiment.dataset_id)} ·{" "}
+                      {formatDateTime(experiment.created_at)}
+                    </span>
                   </span>
                 </Link>
               </li>

@@ -34,7 +34,7 @@ export function CodeBlock({
       ) : null}
       <pre
         className={cn(
-          "overflow-x-auto px-3 py-2.5 font-mono text-[13px] leading-relaxed text-fg",
+          "max-h-96 overflow-x-auto overflow-y-auto px-3 py-2.5 font-mono text-[13px] leading-relaxed text-fg",
           wrap && "whitespace-pre-wrap break-words",
         )}
       >

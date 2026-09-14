@@ -8,7 +8,7 @@ export function HelpButton() {
   return (
     <button
       type="button"
-      onClick={openHelp}
+      onClick={() => openHelp()}
       aria-label="Help"
       className="inline-flex h-8 items-center gap-1.5 rounded-md border border-border px-2.5 text-[13px] font-medium text-fg-muted transition-colors hover:bg-surface-raised hover:text-fg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
     >

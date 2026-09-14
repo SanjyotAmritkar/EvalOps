@@ -1,9 +1,12 @@
 import { describe, expect, it } from "vitest";
 import type { MetricEvidence, MetricLine } from "@/lib/api/types";
 import {
+  DECISION_STATE_LABEL,
   EVIDENCE_STATUS_LABEL,
   METRIC_STATUS_LABEL,
   blockingSentence,
+  decisionState,
+  decisionStateTone,
   evidenceStatus,
   metricDisplayStatus,
   metricStatus,
@@ -147,6 +150,42 @@ describe("evidenceStatus", () => {
   it("has a label for every evidence status", () => {
     expect(EVIDENCE_STATUS_LABEL["supports-regression"]).toBe("CI supports a regression");
     expect(EVIDENCE_STATUS_LABEL.insufficient).toBe("Insufficient evidence");
+  });
+});
+
+describe("decisionState (CP 10.6B: shared by DecisionHero and DecisionBadge)", () => {
+  it("is not-gated when no release policy is attached", () => {
+    expect(decisionState({ gated: false, decision: "pass" })).toBe("not-gated");
+  });
+
+  it("is block on a block decision, regardless of advisories", () => {
+    expect(
+      decisionState({ gated: true, decision: "block", advisories: ["x"] }),
+    ).toBe("block");
+  });
+
+  it("is advisory on a pass that still carries an advisory", () => {
+    expect(
+      decisionState({ gated: true, decision: "pass", advisories: ["x"] }),
+    ).toBe("advisory");
+  });
+
+  it("is a clean pass with no advisories", () => {
+    expect(decisionState({ gated: true, decision: "pass", advisories: [] })).toBe(
+      "pass",
+    );
+    expect(decisionState({ gated: true, decision: "pass" })).toBe("pass");
+  });
+
+  it("has a label and a Badge tone for every state", () => {
+    for (const state of ["pass", "block", "advisory", "not-gated"] as const) {
+      expect(DECISION_STATE_LABEL[state]).toBeTruthy();
+      expect(["pass", "block", "warn", "neutral"]).toContain(
+        decisionStateTone(state),
+      );
+    }
+    expect(decisionStateTone("block")).toBe("block");
+    expect(decisionStateTone("advisory")).toBe("warn");
   });
 });
 

@@ -145,7 +145,7 @@ export function MetricComparison({ metrics }: { metrics: MetricLine[] }) {
           What changed, metric by metric
         </h2>
         {hasPassRate || hasMeanScore ? (
-          <InfoHint label="Pass rate vs mean score" />
+          <InfoHint label="Pass rate vs mean score" term="evaluation" />
         ) : null}
       </div>
 

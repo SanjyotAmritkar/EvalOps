@@ -121,7 +121,10 @@ export function StatisticalEvidence({
     <section className="flex flex-col gap-2">
       <div className="flex items-center gap-2">
         <h2 className="text-lg font-semibold text-fg">Statistical evidence</h2>
-        <InfoHint label="How the statistical evidence is computed" />
+        <InfoHint
+          label="How the statistical evidence is computed"
+          term="statistical-evidence"
+        />
       </div>
       <p className="text-[13px] leading-relaxed text-fg-subtle">
         Paired bootstrap over baseline vs candidate runs matched by case and

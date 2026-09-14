@@ -179,7 +179,7 @@ export function RegressionDiagnosticsPanel({
         <h2 className="text-lg font-semibold text-fg">
           {blocked ? "Why was this blocked?" : "Regressing cases"}
         </h2>
-        <InfoHint label="What is a regressing case?" />
+        <InfoHint label="What is a regressing case?" term="regressing-case" />
       </div>
 
       {diagnostics.regressing_pairs === 0 ? (

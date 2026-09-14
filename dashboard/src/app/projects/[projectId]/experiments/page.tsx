@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useState } from "react";
+import { DecisionBadge } from "@/components/decision-badge";
 import { EmptyState } from "@/components/feedback/empty-state";
 import { ErrorState } from "@/components/feedback/error-state";
 import { LoadingState } from "@/components/feedback/loading-state";
@@ -107,6 +108,7 @@ function ExperimentsPageInner() {
           <THead>
             <TR>
               <TH className="w-1/2">Comparison</TH>
+              <TH>Decision</TH>
               <TH>Dataset</TH>
               <TH>Policy</TH>
               <TH>Created</TH>
@@ -128,6 +130,9 @@ function ExperimentsPageInner() {
                       {versionLabel(experiment.candidate_version_id)}
                     </span>
                   </Link>
+                </TD>
+                <TD>
+                  <DecisionBadge experimentId={experiment.id} />
                 </TD>
                 <TD className="text-fg-muted">
                   {datasetLabel(experiment.dataset_id)}

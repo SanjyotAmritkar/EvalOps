@@ -51,6 +51,16 @@ export default function JudgeCalibrationsPage() {
         the dashboard.
       </p>
 
+      <p className="rounded-md border border-warn/30 bg-warn/5 px-4 py-3 text-[13px] leading-relaxed text-fg-muted">
+        <span className="font-medium text-fg">Unlike the rest of EvalOps,</span>{" "}
+        this needs a real judge provider — a working{" "}
+        <code className="font-mono text-[12px]">OPENAI_API_KEY</code> /{" "}
+        <code className="font-mono text-[12px]">ANTHROPIC_API_KEY</code> in the
+        server environment, or a reachable local Ollama. There is no mock judge:
+        the deterministic offline path used everywhere else in EvalOps does not
+        apply here.
+      </p>
+
       {showForm ? (
         <JudgeCalibrationForm
           onCreated={(id) => {

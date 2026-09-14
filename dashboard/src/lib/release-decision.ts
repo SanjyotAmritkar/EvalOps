@@ -3,6 +3,43 @@ import { formatPercent } from "@/lib/format";
 import { metricLabel } from "@/lib/metric-labels";
 
 /**
+ * The dominant, whole-experiment result state — shared by the experiment
+ * page's `DecisionHero` and any compact summary (e.g. a list-row badge), so
+ * the two never disagree. Derived purely from the backend's `decision` /
+ * `gated` / `advisories` fields on the (latest) `EvaluationResult` — nothing
+ * is inferred or recomputed.
+ */
+export type DecisionState = "pass" | "block" | "advisory" | "not-gated";
+
+export function decisionState(result: {
+  gated: boolean;
+  decision: string;
+  advisories?: string[];
+}): DecisionState {
+  if (!result.gated) return "not-gated";
+  if (result.decision === "block") return "block";
+  return (result.advisories?.length ?? 0) > 0 ? "advisory" : "pass";
+}
+
+/** Short label for {@link DecisionState}, e.g. for a compact list badge. */
+export const DECISION_STATE_LABEL: Record<DecisionState, string> = {
+  pass: "PASS",
+  block: "BLOCK",
+  advisory: "PASS · advisory",
+  "not-gated": "Not gated",
+};
+
+/** Tone bucket for {@link DecisionState}, matching the Badge component. */
+export function decisionStateTone(
+  state: DecisionState,
+): "pass" | "block" | "warn" | "neutral" {
+  if (state === "pass") return "pass";
+  if (state === "block") return "block";
+  if (state === "advisory") return "warn";
+  return "neutral";
+}
+
+/**
  * Per-metric status derived purely from the API's verdict fields
  * (`regression`, `adverse_change`, `threshold`). The gate decision itself is
  * made by the backend — this only classifies each row for display.

@@ -100,6 +100,13 @@ describe("JudgeCalibrationsPage", () => {
       screen.getByText(/measures judge trustworthiness only/i),
     ).toBeInTheDocument();
     expect(screen.getByText(/read from the server environment/i)).toBeInTheDocument();
+    // CP 10.6B: calibration is the one feature that needs a real provider —
+    // said up front, not only after a failed submission.
+    expect(
+      screen.getByText(/Unlike the rest of EvalOps,/i),
+    ).toBeInTheDocument();
+    expect(screen.getByText(/OPENAI_API_KEY/)).toBeInTheDocument();
+    expect(screen.getByText(/There is no mock judge/i)).toBeInTheDocument();
     expect(await screen.findByText("No calibrations yet")).toBeInTheDocument();
   });
 
