@@ -889,6 +889,62 @@ identity platform, no arbitrary provider retries, no change to Celery/Redis
 architecture or at-most-once evaluation semantics -- all unchanged from
 CP 10.4 and earlier.
 
+### 7.12 Implemented: deterministic demo data (Phase 10, CP 10.6)
+
+`scripts/seed_demo.py` populates one coherent scenario -- a customer-support
+reply assistant, project `"EvalOps Demo -- Support Assistant"` -- through the
+**public HTTP API only** (no backend-internals shortcut), so a first-time
+evaluator sees every shipped capability without hand-building requests. It
+adds no architecture: it is a client of the existing Dataset -> Experiment ->
+Eval Runner -> statistical evidence -> release gate pipeline, exactly like the
+dashboard or `curl`.
+
+One baseline `SystemVersion` is compared against three different candidates to
+produce, deterministically and with no paid provider (`execution.backend:
+"mock"` throughout, per §3/§6.1's `MockProvider`):
+
+* a clean **PASS** (a safe candidate update: same answers, latency within
+  budget);
+* a genuine, statistically-unconditional **BLOCK** on the 8-case full suite
+  (a risky candidate: wrong on two support-policy questions *and* 80% slower,
+  past the `latency_ms.p95` budget -- which needs no paired-bootstrap evidence
+  to block, per §8.2 rule 3) with real `regression_diagnostics` findings on
+  the two hallucinated cases;
+* the *same* risky candidate re-evaluated on a 4-case subset of the same
+  questions lands as **`regression_low_evidence`** (an advisory, not a BLOCK)
+  under a policy that deliberately does not also gate latency -- a concrete,
+  reproducible illustration of why `gate.MIN_PAIRS_TO_BLOCK` (§8.2) exists;
+* a RAG scenario (§7.4) where the candidate drops one of two retrieved
+  knowledge-base chunks, regressing `retrieval_recall.pass_rate`;
+* an agent scenario (§7.5) where the candidate sends a wrong tool argument and
+  makes an unnecessary extra call, regressing `tool_arguments.pass_rate` and
+  showing the `tool_selection.mean_score` graded blind spot fixed in CP 9.2;
+* four production traces (§7.1) against the baseline version, three carrying a
+  reference and one deliberately without (the non-blocking "no reference"
+  state), promoted (§7.2) into a replayable regression dataset and replayed
+  through the safe candidate to a clean PASS -- closing the
+  production-trace -> regression-dataset -> experiment loop end to end.
+
+**Idempotent, not transactional.** There is no update/delete endpoint for a
+project (by design -- see §6), so "safe to re-run" means *detect and skip*:
+the script looks up the demo project by its fixed name and, if found, prints
+its current state and creates nothing further, the same idiom
+`deploy/azure/04-adopt-existing.sh` already uses for its own resources.
+
+**Judge calibration (§9.1) is deliberately best-effort, not part of the
+guaranteed path.** `LLMJudge` has no mock adapter --
+`evalops.provider_registry.make_provider` resolves only `openai` / `anthropic`
+/ `ollama`, and always requires that provider's real credential (§6.1) -- so
+seeding a calibration run needs a real `OPENAI_API_KEY` / `ANTHROPIC_API_KEY`.
+The script detects one and, only then, seeds one small calibration; otherwise
+it prints a clear skip reason and points at `docs/DEMO.md`. Every other
+scenario above stays 100% offline regardless.
+
+No new persistence, migration, evaluator, gate, or statistics behaviour; no
+architecture expansion. See `docs/DEMO.md` for the guided walkthrough this
+data supports and the README's "Demo data" section for the quick-start
+command.
+
 ---
 
 ## 8. Statistical Rigor

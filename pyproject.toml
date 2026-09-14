@@ -65,6 +65,9 @@ docstring-code-format = true
 python_version = "3.11"
 strict = true
 files = ["src", "tests"]
+# tests/test_seed_demo.py imports scripts/seed_demo.py as a plain module (see
+# the matching [tool.pytest.ini_options] pythonpath entry).
+mypy_path = "scripts"
 
 [[tool.mypy.overrides]]
 # Celery ships no type information.
@@ -79,6 +82,10 @@ disallow_untyped_decorators = false
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+# tests/test_seed_demo.py imports scripts/seed_demo.py (a dev-only demo
+# script, not part of the installed package -- see Makefile's seed-demo
+# target) as a plain top-level module.
+pythonpath = ["scripts"]
 addopts = "-q"
 filterwarnings = [
     # Third-party deprecations from the FastAPI/Starlette test client stack.

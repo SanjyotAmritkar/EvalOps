@@ -1,5 +1,5 @@
 .PHONY: install lint fmt fmt-check type test check api dashboard \
-	compose-up compose-down compose-logs
+	compose-up compose-down compose-logs seed-demo
 
 install:
 	uv sync
@@ -40,3 +40,10 @@ compose-down:
 
 compose-logs:
 	docker compose logs -f api worker
+
+# Deterministic demo data (Phase 10, CP 10.6): populates "EvalOps Demo --
+# Support Assistant" against a running API (default http://127.0.0.1:8000;
+# override with EVALOPS_API_BASE_URL / --base-url). Idempotent -- safe to
+# re-run. See docs/DEMO.md.
+seed-demo:
+	uv run python scripts/seed_demo.py
