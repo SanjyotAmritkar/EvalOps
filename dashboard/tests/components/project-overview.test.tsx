@@ -30,6 +30,9 @@ function stub(counts: {
   datasets: number;
   versions: number;
   experiments: unknown[];
+  /** Per-experiment-id `GET /experiments/{id}/results` payload; an id with no
+   * entry here answers with an empty array (not yet run). */
+  results?: Record<string, unknown[]>;
 }) {
   vi.stubGlobal(
     "fetch",
@@ -58,6 +61,11 @@ function stub(counts: {
         );
       if (url.endsWith("/experiments"))
         return Promise.resolve(jsonResponse(counts.experiments));
+      const resultsMatch = /\/experiments\/([^/]+)\/results$/.exec(url);
+      if (resultsMatch) {
+        const id = resultsMatch[1] as string;
+        return Promise.resolve(jsonResponse(counts.results?.[id] ?? []));
+      }
       return Promise.reject(new Error(`unexpected ${url}`));
     }),
   );
@@ -140,5 +148,104 @@ describe("ProjectOverviewPage", () => {
       "href",
       "/projects/p1/experiments/e-new",
     );
+  });
+
+  function stepFourListItem(): HTMLElement {
+    const title = screen.getByText("Run it and review the release decision");
+    const li = title.closest("li");
+    if (!li) throw new Error("step 4 list item not found");
+    return li;
+  }
+
+  it("marks step 4 incomplete when experiments exist but none has a result yet", async () => {
+    stub({
+      datasets: 1,
+      versions: 2,
+      experiments: [
+        {
+          id: "e1",
+          dataset_id: "d0",
+          baseline_version_id: "v0",
+          candidate_version_id: "v1",
+          created_at: "2026-09-01T00:00:00Z",
+        },
+      ],
+    });
+    render(<ProjectOverviewPage />, { wrapper: makeWrapper() });
+
+    await screen.findByText("Run it and review the release decision");
+    await waitFor(() => expect(stepFourListItem()).not.toHaveTextContent("✓"));
+  });
+
+  it("marks step 4 complete only once a persisted result exists — even on an older, non-recent experiment", async () => {
+    // Four experiments: the completed result sits on the OLDEST one, which
+    // falls outside the "Recent experiments" (top-3) slice below -- proving
+    // the check considers every experiment, not just the recent few.
+    stub({
+      datasets: 1,
+      versions: 2,
+      experiments: [
+        {
+          id: "e-oldest-with-result",
+          dataset_id: "d0",
+          baseline_version_id: "v0",
+          candidate_version_id: "v1",
+          created_at: "2026-09-01T00:00:00Z",
+        },
+        {
+          id: "e2",
+          dataset_id: "d0",
+          baseline_version_id: "v0",
+          candidate_version_id: "v1",
+          created_at: "2026-09-02T00:00:00Z",
+        },
+        {
+          id: "e3",
+          dataset_id: "d0",
+          baseline_version_id: "v0",
+          candidate_version_id: "v1",
+          created_at: "2026-09-03T00:00:00Z",
+        },
+        {
+          id: "e-newest",
+          dataset_id: "d0",
+          baseline_version_id: "v0",
+          candidate_version_id: "v1",
+          created_at: "2026-09-04T00:00:00Z",
+        },
+      ],
+      results: {
+        "e-oldest-with-result": [
+          {
+            id: "r1",
+            experiment_id: "e-oldest-with-result",
+            created_at: "2026-09-01T01:00:00Z",
+            decision: "block",
+            gated: true,
+            reasons: ["latency_ms.p95: lower-is-better regression of 50.0% (limit 20%)"],
+            metrics: [],
+            advisories: [],
+          },
+        ],
+      },
+    });
+    render(<ProjectOverviewPage />, { wrapper: makeWrapper() });
+
+    await screen.findByText("Run it and review the release decision");
+    // recent-experiments slice only shows the 3 newest -- the completed one
+    // is deliberately not among them
+    await waitFor(() =>
+      expect(screen.getByText("Recent experiments")).toBeInTheDocument(),
+    );
+    const recentHrefs = screen
+      .getAllByRole("link")
+      .map((el) => el.getAttribute("href"))
+      .filter((href): href is string => href?.includes("/experiments/") ?? false);
+    expect(recentHrefs).not.toContain(
+      "/projects/p1/experiments/e-oldest-with-result",
+    );
+    expect(recentHrefs).toHaveLength(3);
+
+    await waitFor(() => expect(stepFourListItem()).toHaveTextContent("✓"));
   });
 });

@@ -1,6 +1,11 @@
 "use client";
 
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import {
+  useMutation,
+  useQueries,
+  useQuery,
+  useQueryClient,
+} from "@tanstack/react-query";
 import {
   createExperiment,
   getExperiment,
@@ -54,6 +59,42 @@ export function useExperimentResults(experimentId: string) {
     queryFn: () => listExperimentResults(experimentId),
     enabled: experimentId.length > 0,
   });
+}
+
+/**
+ * Whether *any* experiment in `experimentIds` has at least one persisted
+ * `EvaluationResult` — the authoritative "has this project run and reviewed a
+ * release decision yet?" signal (Project Overview's Setup step 4). Fans the
+ * same `GET /experiments/{id}/results` query {@link useExperimentResults}
+ * uses out over every experiment (not just the recently-created few), so an
+ * older experiment with a completed PASS / BLOCK / PASS-with-advisory result
+ * counts identically — the check is only "a non-empty results array exists
+ * somewhere", never which decision it holds. Shares the same query key, so a
+ * page that already rendered a `DecisionBadge` for one of these ids reuses
+ * its cached answer instead of refetching.
+ *
+ * `isPending` is true only while a query that hasn't answered yet is still
+ * loading (not just "some query, somewhere, is refetching in the
+ * background") -- callers should treat `hasCompletedResult` as `false` while
+ * `isPending`, so a still-loading project never flashes "done". A rejected
+ * query (network/API error) is likewise never a completed result — it is
+ * treated the same as "no data found" from that experiment, not surfaced as
+ * a page-level error.
+ */
+export function useProjectHasCompletedResult(experimentIds: string[]) {
+  const results = useQueries({
+    queries: experimentIds.map((id) => ({
+      queryKey: queryKeys.experiments.results(id),
+      queryFn: () => listExperimentResults(id),
+    })),
+  });
+
+  const isPending = results.some((r) => r.isPending);
+  const hasCompletedResult = results.some(
+    (r) => r.status === "success" && r.data.length > 0,
+  );
+
+  return { isPending, hasCompletedResult };
 }
 
 /**

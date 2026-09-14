@@ -9,7 +9,10 @@ import { Steps } from "@/components/ui/steps";
 import { WorkflowSteps } from "@/components/ui/workflow-steps";
 import { formatDateTime, shortId } from "@/lib/format";
 import { useDatasets } from "@/lib/query/datasets";
-import { useExperiments } from "@/lib/query/experiments";
+import {
+  useExperiments,
+  useProjectHasCompletedResult,
+} from "@/lib/query/experiments";
 import { useProject } from "@/lib/query/projects";
 import { useSystemVersions } from "@/lib/query/system-versions";
 
@@ -27,6 +30,12 @@ export default function ProjectOverviewPage() {
   const versionCount = versions.data?.length ?? 0;
   const experimentCount = experiments.data?.length ?? 0;
   const readyToRun = datasetCount >= 1 && versionCount >= 2;
+
+  // Every experiment in the project, not just the "Recent experiments" slice
+  // below — an older experiment can hold the only completed result.
+  const experimentIds = (experiments.data ?? []).map((e) => e.id);
+  const { isPending: resultsPending, hasCompletedResult } =
+    useProjectHasCompletedResult(experimentIds);
 
   const recentExperiments = [...(experiments.data ?? [])]
     .sort((a, b) => b.created_at.localeCompare(a.created_at))
@@ -129,7 +138,7 @@ export default function ProjectOverviewPage() {
               },
               {
                 title: "Run it and review the release decision",
-                done: false,
+                done: !resultsPending && hasCompletedResult,
                 description:
                   "Execution is asynchronous; the decision and statistical evidence appear on the experiment page.",
               },
