@@ -1,7 +1,12 @@
 # EvalOps dashboard
 
-The web console for EvalOps. Phase 3, checkpoint 3.1 — the foundation and the
-**Projects** screen (list + create) wired to the real FastAPI API.
+The web console for EvalOps: projects, datasets, system versions, experiments
+(decision-first results, statistical evidence, regression diagnostics),
+release policies, production traces (capture → promote → replay), RAG/agent
+evaluation, and judge calibration — every number rendered comes from the
+FastAPI API; no metric or gate decision is computed in the browser. See the
+root [README](../README.md) and [docs/ARCHITECTURE.md](../docs/ARCHITECTURE.md)
+for the full picture.
 
 ## Stack
 

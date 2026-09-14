@@ -1,6 +1,6 @@
 # EvalOps — Architecture & Project Reference
 
-**Status:** Phases 0 and 1 shipped and locally verified — domain model frozen; the `evalops run` CLI evaluation loop works end to end with a deterministic mock backend (used by CI, which requires no network or Ollama) and a real local Ollama backend. Phase 2 (persistence + API) is next.
+**Status:** Phases 0 through 10 shipped and verified — domain model frozen; the `evalops run` CLI, the persisted API, the full dashboard console, statistical release gating, RAG/agent evaluation, judge calibration, the production-trace regression loop, async Celery/Redis execution, observability, API security, and the Azure production deployment all work end to end (see §7 for the checkpoint-by-checkpoint record, and the README's "Status" section for the condensed version). CP 10.6 (portfolio/demo finish — a deterministic seed script, UX polish, and this documentation pass) is the final checkpoint; nothing is currently in progress.
 **Purpose of this document:** single source of truth for the system design, scope, roadmap, and acceptance criteria. Any contributor (human or tool-assisted) picking up this repo should be able to read this file and know exactly what to build next and why.
 
 ---
@@ -1212,7 +1212,7 @@ The project is done when this sequence runs live, with no hand-waving and no stu
 14. Evaluation passes
 15. GitHub release gate turns green
 
-Stretch (once Phase 8 exists):
+Extended (written as a stretch goal before Phase 8 existed; shipped since CP 8.2/8.3 and demonstrated end to end by the seeded demo's Production Traces workflow — see `docs/DEMO.md`):
 
 16. Show a failed production trace
 17. Promote it to the regression dataset
