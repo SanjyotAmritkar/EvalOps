@@ -20,6 +20,11 @@ drag-and-drop agent builder. It answers one narrow, practical question: *is
 this specific candidate version of my specific application safe and good
 enough to ship, relative to what's already in production?*
 
+![EvalOps blocking a release after comparing a baseline and a candidate](docs/assets/evalops-release-blocked.png)
+
+*EvalOps compares a production baseline against a candidate and blocks the
+release when a policy regression has enough statistical evidence behind it.*
+
 ---
 
 ## The problem
@@ -129,6 +134,12 @@ No RAG-specific or agent-specific runner, gate, or statistics engine exists
 anywhere in this list — every one of these extends the same evaluator
 contract and flows through the same aggregation → statistical evidence →
 release gate path.
+
+![Case-level regression diagnostics tracing a blocked release to specific cases and evaluators](docs/assets/evalops-regression-diagnostics.png)
+
+*A blocked release traced down to the specific cases and evaluator
+pass→fail regressions behind it — explanatory only, computed after the gate
+decision above, never a second gate.*
 
 ---
 
